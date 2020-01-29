@@ -6,6 +6,6 @@ spec:
   spiffeId: spiffe://main.staging.transferwise.spire/foobar/baz
   selector:
     podLabel:
-      app: davethewonderpony
+      app: davethewonderhorse
       animal: horse
 

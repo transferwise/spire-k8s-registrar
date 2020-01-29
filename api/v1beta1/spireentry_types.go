@@ -49,6 +49,8 @@ type SpireEntryStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:subresource:status
 
 // SpireEntry is the Schema for the spireentries API
 type SpireEntry struct {

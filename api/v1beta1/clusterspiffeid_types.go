@@ -38,6 +38,7 @@ type ClusterSpiffeIDStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Cluster
 
 // ClusterSpiffeID is the Schema for the clusterspiffeids API
 type ClusterSpiffeID struct {

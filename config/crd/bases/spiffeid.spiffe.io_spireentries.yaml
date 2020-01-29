@@ -14,7 +14,9 @@ spec:
     listKind: SpireEntryList
     plural: spireentries
     singular: spireentry
-  scope: Namespaced
+  scope: Cluster
+  subresources:
+    status: {}
   validation:
     openAPIV3Schema:
       description: SpireEntry is the Schema for the spireentries API
