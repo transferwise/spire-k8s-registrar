@@ -4,4 +4,7 @@ resources:
 - group: spiffeid
   kind: ClusterSpiffeID
   version: v1beta1
+- group: spiffeid
+  kind: SpireEntry
+  version: v1beta1
 version: "2"

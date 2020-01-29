@@ -1,0 +1,7 @@
+apiVersion: spiffeid.io.spiffe/v1beta1
+kind: SpireEntry
+metadata:
+  name: spireentry-sample
+spec:
+  # Add fields here
+  foo: bar
