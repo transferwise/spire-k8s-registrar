@@ -68,6 +68,32 @@ func (r *SpireEntryReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) 
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	myFinalizerName := "spire.finalizers.spireentry.spiffeid.spiffe.io"
+	if spireEntry.ObjectMeta.DeletionTimestamp.IsZero() {
+		if !containsString(spireEntry.GetFinalizers(), myFinalizerName) {
+			spireEntry.SetFinalizers(append(spireEntry.GetFinalizers(), myFinalizerName))
+			if err := r.Update(ctx, &spireEntry); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		if containsString(spireEntry.GetFinalizers(), myFinalizerName) {
+			// our finalizer is present, so lets handle any external dependency
+			if err := r.ensureDeleted(ctx, *spireEntry.Status.EntryId); err != nil {
+				log.Error(err, "unable to delete spire entry", "entryid", *spireEntry.Status.EntryId)
+				return ctrl.Result{}, err
+			}
+
+			// remove our finalizer from the list and update it.
+			spireEntry.SetFinalizers(removeString(spireEntry.GetFinalizers(), myFinalizerName))
+			if err := r.Update(ctx, &spireEntry); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		log.Info("Finalized entry", "entry", spireEntry.Name)
+		return ctrl.Result{}, nil
+	}
+
 	entryId, err := r.getOrCreateSpireEntry(ctx, log, &spireEntry)
 	if err != nil {
 		log.Error(err, "unable to create spire entry", "request", req)
@@ -102,6 +128,15 @@ func (r *SpireEntryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *SpireEntryReconciler) ensureDeleted(ctx context.Context, entryId string) error {
 	if _, err := r.SpireClient.DeleteEntry(ctx, &registration.RegistrationEntryID{Id: entryId}); err != nil {
 		if status.Code(err) != codes.NotFound {
+			if status.Code(err) == codes.Internal {
+				// Spire server currently returns a 500 if delete fails due to the entry not existing. This is probably a bug.
+				// We work around it by attempting to fetch the entry, and if it's not found then all is good.
+				if _, err := r.SpireClient.FetchEntry(ctx, &registration.RegistrationEntryID{Id: entryId}); err != nil {
+					if status.Code(err) == codes.NotFound {
+						return nil
+					}
+				}
+			}
 			return err
 		}
 	}
@@ -237,4 +272,24 @@ func (r *SpireEntryReconciler) getOrCreateSpireEntry(ctx context.Context, reqLog
 
 	return regEntryId.Id, nil
 
+}
+
+// Helper functions to check and remove string from a slice of strings.
+func containsString(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+func removeString(slice []string, s string) (result []string) {
+	for _, item := range slice {
+		if item == s {
+			continue
+		}
+		result = append(result, item)
+	}
+	return
 }

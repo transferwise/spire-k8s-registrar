@@ -22,6 +22,7 @@ import (
 	"github.com/go-logr/logr"
 	"hash"
 	"hash/fnv"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/rand"
@@ -75,8 +76,11 @@ func (r *ClusterSpiffeIDReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	}
 
 	if err := r.Create(ctx, &entry); err != nil {
-		log.Error(err, "unable to create SpireEntry")
-		return ctrl.Result{}, err
+		if !errors.IsAlreadyExists(err) {
+			log.Error(err, "unable to create SpireEntry")
+			return ctrl.Result{}, err
+		}
+		// TODO if already exists we need to add a relationship with it.
 	}
 
 	return ctrl.Result{}, nil
