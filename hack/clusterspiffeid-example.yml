@@ -1,0 +1,11 @@
+apiVersion: spiffeid.spiffe.io/v1beta1
+kind: ClusterSpiffeID
+metadata:
+  name: test-cluster-spiffe-id
+spec:
+  spiffeId: spiffe://main.staging.transferwise.spire/foobar/baz
+  selector:
+    podLabel:
+      app: davethewonderhorse
+      animal: horse
+

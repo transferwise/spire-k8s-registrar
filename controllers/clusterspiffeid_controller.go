@@ -17,9 +17,14 @@ package controllers
 
 import (
 	"context"
-
+	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/go-logr/logr"
+	"hash"
+	"hash/fnv"
+	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/rand"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -50,7 +55,42 @@ func (r *ClusterSpiffeIDReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	entrySpec := spiffeidv1beta1.SpireEntrySpec{
+		SpiffeId: clusterSpiffeID.Spec.SpiffeId,
+		Selector: clusterSpiffeID.Spec.Selector,
+	}
+
+	// TODO: This wont cope with hash collisions at all...
+	spireEntrySpecHasher := fnv.New64a()
+	deepHashObject(spireEntrySpecHasher, entrySpec)
+	entryName := rand.SafeEncodeString(fmt.Sprint(spireEntrySpecHasher.Sum64()))
+
+	entry := spiffeidv1beta1.SpireEntry{
+		ObjectMeta: v1.ObjectMeta{
+			Labels:      make(map[string]string),
+			Annotations: make(map[string]string),
+			Name:        entryName,
+		},
+		Spec: entrySpec,
+	}
+
+	if err := r.Create(ctx, &entry); err != nil {
+		log.Error(err, "unable to create SpireEntry")
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func deepHashObject(hasher hash.Hash, objectToWrite interface{}) {
+	hasher.Reset()
+	printer := spew.ConfigState{
+		Indent:         " ",
+		SortKeys:       true,
+		DisableMethods: true,
+		SpewKeys:       true,
+	}
+	printer.Fprintf(hasher, "%#v", objectToWrite)
 }
 
 func (r *ClusterSpiffeIDReconciler) SetupWithManager(mgr ctrl.Manager) error {
