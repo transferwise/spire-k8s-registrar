@@ -21,16 +21,16 @@ import (
 	"fmt"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"net/url"
 	"path"
 
 	"github.com/go-logr/logr"
+	"github.com/spiffe/spire/proto/spire/api/registration"
+	"github.com/spiffe/spire/proto/spire/common"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/spiffe/spire/proto/spire/api/registration"
-	"github.com/spiffe/spire/proto/spire/common"
 
 	spiffeidv1beta1 "github.com/transferwise/spire-k8s-registrar/api/v1beta1"
 )
@@ -61,7 +61,9 @@ func (r *SpireEntryReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) 
 
 	var spireEntry spiffeidv1beta1.SpireEntry
 	if err := r.Get(ctx, req.NamespacedName, &spireEntry); err != nil {
-		log.Error(err, "unable to fetch SpireEntry")
+		if !k8serrors.IsNotFound(err) {
+			log.Error(err, "unable to fetch SpireEntry")
+		}
 		// we'll ignore not-found errors, since they can't be fixed by an immediate
 		// requeue (we'll need to wait for a new notification), and we can get them
 		// on deleted requests.

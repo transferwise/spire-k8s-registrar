@@ -19,13 +19,15 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
+
 	"github.com/go-logr/logr"
 	"github.com/spiffe/spire/proto/spire/api/registration"
-	"os"
 
 	"github.com/spiffe/go-spiffe/spiffe"
 	spiffeidv1beta1 "github.com/transferwise/spire-k8s-registrar/api/v1beta1"
 	"github.com/transferwise/spire-k8s-registrar/controllers"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
@@ -44,6 +46,7 @@ func init() {
 	_ = clientgoscheme.AddToScheme(scheme)
 
 	_ = spiffeidv1beta1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -53,12 +56,20 @@ func main() {
 	var spireHost string
 	var trustDomain string
 	var cluster string
+	var enablePodController bool
+	var podLabel string
+	var podAnnotation string
+
 	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
 		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&spireHost, "spire-server", "", "Host and port of the spire server to connect to")
 	flag.StringVar(&trustDomain, "trust-domain", "", "Spire trust domain to create IDs for")
 	flag.StringVar(&cluster, "cluster", "", "Cluster name as configured for psat attestor")
+	flag.BoolVar(&enablePodController, "enable-pod-controller", false, "Enable support for old controller style spiffe ID creation")
+	flag.StringVar(&podLabel, "pod-label", "", "Pod label to use for old auto-creation mechanism")
+	flag.StringVar(&podAnnotation, "pod-annotation", "", "Pod annotation to use for old auto-creation mechanism")
+
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(func(o *zap.Options) {
@@ -117,6 +128,29 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SpireEntry")
 		os.Exit(1)
+	}
+	if enablePodController {
+		mode := controllers.PodReconcilerModeServiceAccount
+		value := ""
+		if len(podLabel) > 0 {
+			mode = controllers.PodReconcilerModeLabel
+			value = podLabel
+		}
+		if len(podAnnotation) > 0 {
+			mode = controllers.PodReconcilerModeAnnotation
+			value = podAnnotation
+		}
+		if err = (&controllers.PodReconciler{
+			Client:      mgr.GetClient(),
+			Log:         ctrl.Log.WithName("controllers").WithName("Pod"),
+			Scheme:      mgr.GetScheme(),
+			TrustDomain: trustDomain,
+			Mode:        mode,
+			Value:       value,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "Pod")
+			os.Exit(1)
+		}
 	}
 	// +kubebuilder:scaffold:builder
 
