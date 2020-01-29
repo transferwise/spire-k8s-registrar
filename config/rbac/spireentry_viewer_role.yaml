@@ -5,7 +5,7 @@ metadata:
   name: spireentry-viewer-role
 rules:
 - apiGroups:
-  - spiffeid.io.spiffe
+  - spiffeid.spiffe.io
   resources:
   - spireentries
   verbs:
@@ -13,7 +13,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - spiffeid.io.spiffe
+  - spiffeid.spiffe.io
   resources:
   - spireentries/status
   verbs:

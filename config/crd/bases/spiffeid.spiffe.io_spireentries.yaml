@@ -6,9 +6,9 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.2.4
   creationTimestamp: null
-  name: spireentries.spiffeid.io.spiffe
+  name: spireentries.spiffeid.spiffe.io
 spec:
-  group: spiffeid.io.spiffe
+  group: spiffeid.spiffe.io
   names:
     kind: SpireEntry
     listKind: SpireEntryList

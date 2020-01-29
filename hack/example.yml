@@ -1,0 +1,11 @@
+apiVersion: spiffeid.spiffe.io/v1beta1
+kind: SpireEntry
+metadata:
+  name: test-spire-entry
+spec:
+  spiffeId: spiffe://main.staging.transferwise.spire/foobar/baz
+  selector:
+    podLabel:
+      app: davethewonderpony
+      animal: horse
+

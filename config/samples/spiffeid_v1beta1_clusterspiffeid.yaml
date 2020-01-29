@@ -1,4 +1,4 @@
-apiVersion: spiffeid.io.spiffe/v1beta1
+apiVersion: spiffeid.spiffe.io/v1beta1
 kind: ClusterSpiffeID
 metadata:
   name: clusterspiffeid-sample

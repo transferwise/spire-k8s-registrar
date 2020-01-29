@@ -7,7 +7,7 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - spiffeid.io.spiffe
+  - spiffeid.spiffe.io
   resources:
   - clusterspiffeids
   verbs:
@@ -19,7 +19,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - spiffeid.io.spiffe
+  - spiffeid.spiffe.io
   resources:
   - clusterspiffeids/status
   verbs:
@@ -27,7 +27,7 @@ rules:
   - patch
   - update
 - apiGroups:
-  - spiffeid.io.spiffe
+  - spiffeid.spiffe.io
   resources:
   - spireentries
   verbs:
@@ -39,7 +39,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - spiffeid.io.spiffe
+  - spiffeid.spiffe.io
   resources:
   - spireentries/status
   verbs:

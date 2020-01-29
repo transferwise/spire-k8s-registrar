@@ -33,14 +33,22 @@ type ClusterSpiffeIDReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=spiffeid.io.spiffe,resources=clusterspiffeids,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=spiffeid.io.spiffe,resources=clusterspiffeids/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=spiffeid.spiffe.io,resources=clusterspiffeids,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=spiffeid.spiffe.io,resources=spireentries,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=spiffeid.spiffe.io,resources=clusterspiffeids/status,verbs=get;update;patch
 
 func (r *ClusterSpiffeIDReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
-	_ = context.Background()
-	_ = r.Log.WithValues("clusterspiffeid", req.NamespacedName)
+	ctx := context.Background()
+	log := r.Log.WithValues("clusterspiffeid", req.NamespacedName)
 
-	// your logic here
+	var clusterSpiffeID spiffeidv1beta1.ClusterSpiffeID
+	if err := r.Get(ctx, req.NamespacedName, &clusterSpiffeID); err != nil {
+		log.Error(err, "unable to fetch ClusterSpiffeID")
+		// we'll ignore not-found errors, since they can't be fixed by an immediate
+		// requeue (we'll need to wait for a new notification), and we can get them
+		// on deleted requests.
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
 
 	return ctrl.Result{}, nil
 }

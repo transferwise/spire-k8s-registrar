@@ -5,7 +5,7 @@ metadata:
   name: spireentry-editor-role
 rules:
 - apiGroups:
-  - spiffeid.io.spiffe
+  - spiffeid.spiffe.io
   resources:
   - spireentries
   verbs:
@@ -17,7 +17,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - spiffeid.io.spiffe
+  - spiffeid.spiffe.io
   resources:
   - spireentries/status
   verbs:

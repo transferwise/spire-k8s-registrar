@@ -46,8 +46,8 @@ type SpireEntryReconciler struct {
 	Cluster     string
 }
 
-// +kubebuilder:rbac:groups=spiffeid.io.spiffe,resources=spireentries,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=spiffeid.io.spiffe,resources=spireentries/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=spiffeid.spiffe.io,resources=spireentries,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=spiffeid.spiffe.io,resources=spireentries/status,verbs=get;update;patch
 
 func (r *SpireEntryReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
