@@ -22,19 +22,30 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+type Selector struct {
+	// Pod label names/values to match for this spiffe ID
+	// To match, pods must be in the same namespace as this ID resource.
+	PodLabel       map[string]string `json:"podLabel,omitempty"`
+	PodName        string            `json:"podName,omitempty"`
+	Namespace      string            `json:"namespace,omitempty"`
+	ServiceAccount string            `json:"serviceAccount,omitempty"`
+	Arbitrary      []string          `json:"arbitrary,omitempty"`
+}
+
 // SpireEntrySpec defines the desired state of SpireEntry
 type SpireEntrySpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of SpireEntry. Edit SpireEntry_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	SpiffeId string   `json:"spiffeId"`
+	Selector Selector `json:"selector"`
 }
 
 // SpireEntryStatus defines the observed state of SpireEntry
 type SpireEntryStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	EntryId string `json:"entryId,omitempty"`
 }
 
 // +kubebuilder:object:root=true

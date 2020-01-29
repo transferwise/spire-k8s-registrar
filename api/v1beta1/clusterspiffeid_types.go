@@ -27,8 +27,8 @@ type ClusterSpiffeIDSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of ClusterSpiffeID. Edit ClusterSpiffeID_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	SpiffeId string   `json:"spiffeId"`
+	Selector Selector `json:"selector"`
 }
 
 // ClusterSpiffeIDStatus defines the observed state of ClusterSpiffeID
