@@ -26,3 +26,23 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - spiffeid.io.spiffe
+  resources:
+  - spireentries
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - spiffeid.io.spiffe
+  resources:
+  - spireentries/status
+  verbs:
+  - get
+  - patch
+  - update

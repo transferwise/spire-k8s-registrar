@@ -80,7 +80,7 @@ func main() {
 	}
 
 	// Setup all Controllers
-	spireClient, err := ConnectSpire(context.TODO(), setupLog, spireHost)
+	spireClient, err := ConnectSpire(context.Background(), setupLog, spireHost)
 	if err != nil {
 		setupLog.Error(err, "unable to connect to spire server")
 		os.Exit(1)
