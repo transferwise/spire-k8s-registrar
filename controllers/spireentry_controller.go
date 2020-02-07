@@ -238,16 +238,28 @@ func (r *SpireEntryReconciler) getOrCreateSpireEntry(ctx context.Context, reqLog
 	// TODO: sanitize!
 	selectors := make([]*common.Selector, 0, len(instance.Spec.Selector.PodLabel))
 	for k, v := range instance.Spec.Selector.PodLabel {
-		selectors = append(selectors, &common.Selector{Value: fmt.Sprintf("k8s:pod-label:%s:%s", k, v)})
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("pod-label:%s:%s", k, v),
+		})
 	}
 	if len(instance.Spec.Selector.PodName) > 0 {
-		selectors = append(selectors, &common.Selector{Value: fmt.Sprintf("k8s:pod-name:%s", instance.Spec.Selector.PodName)})
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("pod-name:%s", instance.Spec.Selector.PodName),
+		})
 	}
 	if len(instance.Spec.Selector.Namespace) > 0 {
-		selectors = append(selectors, &common.Selector{Value: fmt.Sprintf("k8s:ns:%s", instance.Spec.Selector.Namespace)})
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("ns:%s", instance.Spec.Selector.Namespace),
+		})
 	}
 	if len(instance.Spec.Selector.ServiceAccount) > 0 {
-		selectors = append(selectors, &common.Selector{Value: fmt.Sprintf("k8s:sa:%s", instance.Spec.Selector.ServiceAccount)})
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("sa:%s", instance.Spec.Selector.ServiceAccount),
+		})
 	}
 	for _, v := range instance.Spec.Selector.Arbitrary {
 		selectors = append(selectors, &common.Selector{Value: v})
