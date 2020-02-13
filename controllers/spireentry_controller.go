@@ -81,7 +81,7 @@ func (r *SpireEntryReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) 
 	} else {
 		if containsString(spireEntry.GetFinalizers(), myFinalizerName) {
 			// our finalizer is present, so lets handle any external dependency
-			if err := r.ensureDeleted(ctx, *spireEntry.Status.EntryId); err != nil {
+			if err := r.ensureDeleted(ctx, log, *spireEntry.Status.EntryId); err != nil {
 				log.Error(err, "unable to delete spire entry", "entryid", *spireEntry.Status.EntryId)
 				return ctrl.Result{}, err
 			}
@@ -91,8 +91,8 @@ func (r *SpireEntryReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) 
 			if err := r.Update(ctx, &spireEntry); err != nil {
 				return ctrl.Result{}, err
 			}
+			log.Info("Finalized entry", "entry", spireEntry.Name)
 		}
-		log.Info("Finalized entry", "entry", spireEntry.Name)
 		return ctrl.Result{}, nil
 	}
 
@@ -106,7 +106,7 @@ func (r *SpireEntryReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) 
 		// We need to update the Status field
 		if oldEntryId != nil {
 			// entry resource must have been modified, delete the hanging one
-			if err := r.ensureDeleted(ctx, *spireEntry.Status.EntryId); err != nil {
+			if err := r.ensureDeleted(ctx, log, *spireEntry.Status.EntryId); err != nil {
 				log.Error(err, "unable to delete old spire entry", "entryid", *spireEntry.Status.EntryId)
 				return ctrl.Result{}, err
 			}
@@ -127,7 +127,7 @@ func (r *SpireEntryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *SpireEntryReconciler) ensureDeleted(ctx context.Context, entryId string) error {
+func (r *SpireEntryReconciler) ensureDeleted(ctx context.Context, reqLogger logr.Logger, entryId string) error {
 	if _, err := r.SpireClient.DeleteEntry(ctx, &registration.RegistrationEntryID{Id: entryId}); err != nil {
 		if status.Code(err) != codes.NotFound {
 			if status.Code(err) == codes.Internal {
@@ -135,6 +135,7 @@ func (r *SpireEntryReconciler) ensureDeleted(ctx context.Context, entryId string
 				// We work around it by attempting to fetch the entry, and if it's not found then all is good.
 				if _, err := r.SpireClient.FetchEntry(ctx, &registration.RegistrationEntryID{Id: entryId}); err != nil {
 					if status.Code(err) == codes.NotFound {
+						reqLogger.Info("Entry already deleted", "entry", entryId)
 						return nil
 					}
 				}
@@ -142,6 +143,7 @@ func (r *SpireEntryReconciler) ensureDeleted(ctx context.Context, entryId string
 			return err
 		}
 	}
+	reqLogger.Info("Deleted entry", "entry", entryId)
 	return nil
 }
 
