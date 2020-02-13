@@ -27,6 +27,7 @@ type Selector struct {
 	// To match, pods must be in the same namespace as this ID resource.
 	PodLabel       map[string]string `json:"podLabel,omitempty"`
 	PodName        string            `json:"podName,omitempty"`
+	PodUid         string            `json:"podUid,omitempty"`
 	Namespace      string            `json:"namespace,omitempty"`
 	ServiceAccount string            `json:"serviceAccount,omitempty"`
 	Arbitrary      []string          `json:"arbitrary,omitempty"`
