@@ -17,6 +17,7 @@ package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -24,12 +25,16 @@ import (
 
 type Selector struct {
 	// Pod label names/values to match for this spiffe ID
-	// To match, pods must be in the same namespace as this ID resource.
 	PodLabel       map[string]string `json:"podLabel,omitempty"`
+	// Pod names to match for this spiffe ID
 	PodName        string            `json:"podName,omitempty"`
-	PodUid         string            `json:"podUid,omitempty"`
+	// Pod UIDs to match for this spiffe ID
+	PodUid         types.UID         `json:"podUid,omitempty"`
+	// Namespace to match for this spiffe ID
 	Namespace      string            `json:"namespace,omitempty"`
+	// ServiceAccount to match for this spiffe ID
 	ServiceAccount string            `json:"serviceAccount,omitempty"`
+	// Arbitrary selectors
 	Arbitrary      []string          `json:"arbitrary,omitempty"`
 }
 

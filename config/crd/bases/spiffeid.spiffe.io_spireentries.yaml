@@ -39,22 +39,26 @@ spec:
             selector:
               properties:
                 arbitrary:
+                  description: Arbitrary selectors
                   items:
                     type: string
                   type: array
                 namespace:
+                  description: Namespace to match for this spiffe ID
                   type: string
                 podLabel:
                   additionalProperties:
                     type: string
                   description: Pod label names/values to match for this spiffe ID
-                    To match, pods must be in the same namespace as this ID resource.
                   type: object
                 podName:
+                  description: Pod names to match for this spiffe ID
                   type: string
                 podUid:
+                  description: Pod UIDs to match for this spiffe ID
                   type: string
                 serviceAccount:
+                  description: ServiceAccount to match for this spiffe ID
                   type: string
               type: object
             spiffeId:
