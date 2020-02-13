@@ -52,6 +52,8 @@ spec:
                   type: object
                 podName:
                   type: string
+                podUid:
+                  type: string
                 serviceAccount:
                   type: string
               type: object
