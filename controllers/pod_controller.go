@@ -102,7 +102,8 @@ func (r *PodReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			Spec: spiffeidv1beta1.ClusterSpiffeIDSpec{
 				SpiffeId: spiffeId,
 				Selector: spiffeidv1beta1.Selector{
-					PodName: pod.Name,
+					PodName:   pod.Name,
+					Namespace: pod.Namespace,
 				},
 			},
 		}

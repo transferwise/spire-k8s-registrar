@@ -27,6 +27,7 @@ import (
 	"github.com/spiffe/go-spiffe/spiffe"
 	spiffeidv1beta1 "github.com/transferwise/spire-k8s-registrar/api/v1beta1"
 	"github.com/transferwise/spire-k8s-registrar/controllers"
+	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -38,8 +39,9 @@ import (
 )
 
 var (
-	scheme   = runtime.NewScheme()
-	setupLog = ctrl.Log.WithName("setup")
+	scheme     = runtime.NewScheme()
+	setupLog   = ctrl.Log.WithName("setup")
+	configFlag = flag.String("config", "spire-k8s-registrar.conf", "configuration file")
 )
 
 func init() {
@@ -51,58 +53,32 @@ func init() {
 }
 
 func main() {
-	var metricsAddr string
-	var enableLeaderElection bool
-	var spireHost string
-	var trustDomain string
-	var cluster string
-	var enablePodController bool
-	var podLabel string
-	var podAnnotation string
-
-	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
-		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
-	flag.StringVar(&spireHost, "spire-server", "", "Host and port of the spire server to connect to")
-	flag.StringVar(&trustDomain, "trust-domain", "", "Spire trust domain to create IDs for")
-	flag.StringVar(&cluster, "cluster", "", "Cluster name as configured for psat attestor")
-	flag.BoolVar(&enablePodController, "enable-pod-controller", false, "Enable support for old controller style spiffe ID creation")
-	flag.StringVar(&podLabel, "pod-label", "", "Pod label to use for old auto-creation mechanism")
-	flag.StringVar(&podAnnotation, "pod-annotation", "", "Pod annotation to use for old auto-creation mechanism")
-
+	fmt.Println("Parsing config")
 	flag.Parse()
+
+	config, err := LoadConfig(*configFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%+v\n", err)
+		os.Exit(1)
+	}
 
 	ctrl.SetLogger(zap.New(func(o *zap.Options) {
 		o.Development = true
 	}))
 
-	if len(spireHost) <= 0 {
-		setupLog.Error(fmt.Errorf("--spire-server flag must be provided"), "")
-		os.Exit(1)
-	}
-
-	if len(cluster) <= 0 {
-		setupLog.Error(fmt.Errorf("--cluster flag must be provided"), "")
-		os.Exit(1)
-	}
-
-	if len(trustDomain) <= 0 {
-		setupLog.Error(fmt.Errorf("--trust-domain flag must be provided"), "")
-		os.Exit(1)
-	}
-
-	// Setup all Controllers
-	spireClient, err := ConnectSpire(context.Background(), setupLog, spireHost)
+	//Connect to Spire Server
+	spireClient, err := ConnectSpire(context.Background(), setupLog, config.ServerAddress, config.ServerSocketPath)
 	if err != nil {
 		setupLog.Error(err, "unable to connect to spire server")
 		os.Exit(1)
 	}
 	setupLog.Info("Connected to spire server.")
 
+	// Setup all Controllers
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:             scheme,
-		MetricsBindAddress: metricsAddr,
-		LeaderElection:     enableLeaderElection,
+		MetricsBindAddress: config.MetricsAddr,
+		LeaderElection:     config.LeaderElection,
 		Port:               9443,
 	})
 	if err != nil {
@@ -123,28 +99,28 @@ func main() {
 		Log:         ctrl.Log.WithName("controllers").WithName("SpireEntry"),
 		Scheme:      mgr.GetScheme(),
 		SpireClient: spireClient,
-		Cluster:     cluster,
-		TrustDomain: trustDomain,
+		Cluster:     config.Cluster,
+		TrustDomain: config.TrustDomain,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SpireEntry")
 		os.Exit(1)
 	}
-	if enablePodController {
+	if config.PodController {
 		mode := controllers.PodReconcilerModeServiceAccount
 		value := ""
-		if len(podLabel) > 0 {
+		if len(config.PodLabel) > 0 {
 			mode = controllers.PodReconcilerModeLabel
-			value = podLabel
+			value = config.PodLabel
 		}
-		if len(podAnnotation) > 0 {
+		if len(config.PodAnnotation) > 0 {
 			mode = controllers.PodReconcilerModeAnnotation
-			value = podAnnotation
+			value = config.PodAnnotation
 		}
 		if err = (&controllers.PodReconciler{
 			Client:      mgr.GetClient(),
 			Log:         ctrl.Log.WithName("controllers").WithName("Pod"),
 			Scheme:      mgr.GetScheme(),
-			TrustDomain: trustDomain,
+			TrustDomain: config.TrustDomain,
 			Mode:        mode,
 			Value:       value,
 		}).SetupWithManager(mgr); err != nil {
@@ -178,15 +154,26 @@ func (slw SpiffeLogWrapper) Errorf(format string, args ...interface{}) {
 	slw.delegate.Info(fmt.Sprintf(format, args...))
 }
 
-func ConnectSpire(ctx context.Context, log logr.Logger, serviceName string) (registration.RegistrationClient, error) {
+func ConnectSpire(ctx context.Context, log logr.Logger, serverAddress, serverSocketPath string) (registration.RegistrationClient, error) {
 
-	tlsPeer, err := spiffe.NewTLSPeer(spiffe.WithWorkloadAPIAddr("unix:///run/spire/sockets/agent.sock"), spiffe.WithLogger(SpiffeLogWrapper{log}))
-	if err != nil {
-		return nil, err
-	}
-	conn, err := tlsPeer.DialGRPC(ctx, serviceName, spiffe.ExpectAnyPeer())
-	if err != nil {
-		return nil, err
+	var conn *grpc.ClientConn
+	var err error
+
+	if serverAddress != "" {
+		tlsPeer, err := spiffe.NewTLSPeer(spiffe.WithWorkloadAPIAddr("unix://"+serverSocketPath), spiffe.WithLogger(SpiffeLogWrapper{log}))
+		if err != nil {
+			return nil, err
+		}
+		conn, err = tlsPeer.DialGRPC(ctx, serverAddress, spiffe.ExpectAnyPeer())
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		fmt.Printf("Connecting to: %s\n", "unix://"+serverSocketPath)
+		conn, err = grpc.DialContext(ctx, "unix://"+serverSocketPath, grpc.WithInsecure())
+		if err != nil {
+			return nil, err
+		}
 	}
 	spireClient := registration.NewRegistrationClient(conn)
 	return spireClient, nil
