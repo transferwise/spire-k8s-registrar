@@ -56,6 +56,7 @@ func (r *SpireEntryReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) 
 	if r.myId == nil {
 		if err := r.makeMyId(ctx, log); err != nil {
 			log.Error(err, "unable to create parent ID")
+			return ctrl.Result{}, err
 		}
 	}
 
