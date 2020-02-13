@@ -249,6 +249,12 @@ func (r *SpireEntryReconciler) getOrCreateSpireEntry(ctx context.Context, reqLog
 			Value: fmt.Sprintf("pod-name:%s", instance.Spec.Selector.PodName),
 		})
 	}
+	if len(instance.Spec.Selector.PodUid) > 0 {
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("pod-uid:%s", instance.Spec.Selector.PodUid),
+		})
+	}
 	if len(instance.Spec.Selector.Namespace) > 0 {
 		selectors = append(selectors, &common.Selector{
 			Type:  "k8s",

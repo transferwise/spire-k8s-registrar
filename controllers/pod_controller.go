@@ -67,7 +67,7 @@ func (r *PodReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	spiffeidname := fmt.Sprintf("spire-operator-%s", pod.GetName())
+	spiffeidname := fmt.Sprintf("spire-operator-%s", pod.GetUID())
 
 	spiffeId := ""
 	switch r.Mode {
@@ -102,7 +102,7 @@ func (r *PodReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			Spec: spiffeidv1beta1.ClusterSpiffeIDSpec{
 				SpiffeId: spiffeId,
 				Selector: spiffeidv1beta1.Selector{
-					PodName:   pod.Name,
+					PodUid:    pod.GetUID(),
 					Namespace: pod.Namespace,
 				},
 			},
