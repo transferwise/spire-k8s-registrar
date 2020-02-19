@@ -95,32 +95,68 @@ func (r *PodReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			log.Error(err, "Failed to get ClusterSpiffeID", "name", spiffeidname)
 			return ctrl.Result{}, err
 		}
-		clusterSpiffeId := &spiffeidv1beta1.ClusterSpiffeID{
-			ObjectMeta: v1.ObjectMeta{
-				Name: spiffeidname,
-			},
-			Spec: spiffeidv1beta1.ClusterSpiffeIDSpec{
-				SpiffeId: spiffeId,
-				Selector: spiffeidv1beta1.Selector{
-					PodUid:    pod.GetUID(),
-					Namespace: pod.Namespace,
-				},
-			},
-		}
-		// Namespace scoped resource cannot own a cluster scoped resource
-		// Work out how to deal with GC later...
-		//err = controllerutil.SetControllerReference(&pod, clusterSpiffeId, r.Scheme)
-		//if err != nil {
-		//	log.Error(err, "Failed to create new SpiffeID", "SpiffeID.Name", clusterSpiffeId.Name)
-		//	return ctrl.Result{}, err
-		//}
-		log.Info("Creating a new SpiffeID", "SpiffeID.Name", clusterSpiffeId.Name)
-		err = r.Create(ctx, clusterSpiffeId)
-		if err != nil {
-			if !errors.IsAlreadyExists(err) {
-				log.Error(err, "Failed to create new SpiffeID", "SpiffeID.Name", clusterSpiffeId.Name)
+	}
+
+	myFinalizerName := "spiffeid.spiffe.io/pods"
+	if pod.ObjectMeta.DeletionTimestamp.IsZero() {
+		if !containsString(pod.GetFinalizers(), myFinalizerName) {
+			pod.SetFinalizers(append(pod.GetFinalizers(), myFinalizerName))
+			if err := r.Update(ctx, &pod); err != nil {
 				return ctrl.Result{}, err
 			}
+
+			if err := r.Get(ctx, req.NamespacedName, &pod); err != nil {
+				if !errors.IsNotFound(err) {
+					log.Error(err, "unable to fetch Pod")
+				}
+
+				return ctrl.Result{}, client.IgnoreNotFound(err)
+			}
+		}
+	} else {
+		if containsString(pod.GetFinalizers(), myFinalizerName) && existing != nil {
+			// our finalizer is present, so lets handle any external dependency
+			if err := r.Delete(ctx, existing); err != nil {
+				log.Error(err, "unable to delete cluster SPIFFE ID", "clusterSpiffeId", existing.Spec.SpiffeId)
+				return ctrl.Result{}, err
+			}
+
+			// remove our finalizer from the list and update it.
+			pod.SetFinalizers(removeString(pod.GetFinalizers(), myFinalizerName))
+			if err := r.Update(ctx, &pod); err != nil {
+				return ctrl.Result{}, err
+			}
+			log.Info("Finalized entry", "entry", pod.Name)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	clusterSpiffeId := &spiffeidv1beta1.ClusterSpiffeID{
+		ObjectMeta: v1.ObjectMeta{
+			Name:        spiffeidname,
+			Annotations: make(map[string]string),
+		},
+		Spec: spiffeidv1beta1.ClusterSpiffeIDSpec{
+			SpiffeId: spiffeId,
+			Selector: spiffeidv1beta1.Selector{
+				PodUid:    pod.GetUID(),
+				Namespace: pod.Namespace,
+			},
+		},
+	}
+
+	// Namespace scoped resource cannot own a cluster scoped resource
+	// Work out how to deal with GC later...
+	//err = controllerutil.SetControllerReference(&pod, clusterSpiffeId, r.Scheme)
+	//if err != nil {
+	//	log.Error(err, "Failed to create new SpiffeID", "SpiffeID.Name", clusterSpiffeId.Name)
+	//	return ctrl.Result{}, err
+	//}
+	err := r.Create(ctx, clusterSpiffeId)
+	if err != nil {
+		if !errors.IsAlreadyExists(err) {
+			log.Error(err, "Failed to create new SpiffeID", "SpiffeID.Name", clusterSpiffeId.Name)
+			return ctrl.Result{}, err
 		}
 	}
 
