@@ -37,10 +37,16 @@ spec:
             selector:
               properties:
                 arbitrary:
-                  description: Arbitrary selectors
+                  description: Arbitrary k8s selectors
                   items:
                     type: string
                   type: array
+                containerImage:
+                  description: ContainerImage to match
+                  type: string
+                containerName:
+                  description: ContainerName to match
+                  type: string
                 namespace:
                   description: Namespace to match for this spiffe ID
                   type: string
