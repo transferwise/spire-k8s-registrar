@@ -34,7 +34,11 @@ type Selector struct {
 	Namespace string `json:"namespace,omitempty"`
 	// ServiceAccount to match for this spiffe ID
 	ServiceAccount string `json:"serviceAccount,omitempty"`
-	// Arbitrary selectors
+	// ContainerImage to match
+	ContainerImage string `json:"containerImage,omitempty"`
+	// ContainerName to match
+	ContainerName string `json:"containerName,omitempty"`
+	// Arbitrary k8s selectors
 	Arbitrary []string `json:"arbitrary,omitempty"`
 }
 

@@ -267,8 +267,20 @@ func (r *SpireEntryReconciler) getOrCreateSpireEntry(ctx context.Context, reqLog
 			Value: fmt.Sprintf("sa:%s", instance.Spec.Selector.ServiceAccount),
 		})
 	}
+	if len(instance.Spec.Selector.ContainerName) > 0 {
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("container-name:%s", instance.Spec.Selector.ContainerName),
+		})
+	}
+	if len(instance.Spec.Selector.ContainerImage) > 0 {
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("container-image:%s", instance.Spec.Selector.ContainerImage),
+		})
+	}
 	for _, v := range instance.Spec.Selector.Arbitrary {
-		selectors = append(selectors, &common.Selector{Value: v})
+		selectors = append(selectors, &common.Selector{Type: "k8s", Value: v})
 	}
 
 	spiffeId := instance.Spec.SpiffeId
