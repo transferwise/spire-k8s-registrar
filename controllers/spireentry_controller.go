@@ -298,7 +298,7 @@ func (r *SpireEntryReconciler) getOrCreateSpireEntry(ctx context.Context, reqLog
 				return "", err
 			}
 			reqLogger.Info("Found existing entry", "entryID", entryId, "spiffeID", spiffeId)
-			return entryId, err
+			return entryId, nil
 		}
 		reqLogger.Error(err, "Failed to create spire entry")
 		return "", err
