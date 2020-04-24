@@ -214,17 +214,18 @@ func (r *SpireEntryReconciler) getExistingEntry(ctx context.Context, reqLogger l
 		}
 		selectorMap[sel.Type][sel.Value] = true
 	}
+	entryLoop:
 	for _, entry := range entries.Entries {
 		if entry.GetSpiffeId() == id {
 			if len(entry.GetSelectors()) != len(selectors) {
-				continue
+				continue entryLoop
 			}
 			for _, sel := range entry.GetSelectors() {
 				if _, ok := selectorMap[sel.Type]; !ok {
-					continue
+					continue entryLoop
 				}
 				if _, ok := selectorMap[sel.Type][sel.Value]; !ok {
-					continue
+					continue entryLoop
 				}
 			}
 			return entry.GetEntryId(), nil
