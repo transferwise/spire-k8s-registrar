@@ -17,7 +17,6 @@ package controllers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -196,44 +195,6 @@ func (r *SpireEntryReconciler) makeMyId(ctx context.Context, reqLogger logr.Logg
 	return nil
 }
 
-var ExistingEntryNotFoundError = errors.New("no existing matching entry found")
-
-func (r *SpireEntryReconciler) getExistingEntry(ctx context.Context, reqLogger logr.Logger, id string, selectors []*common.Selector) (string, error) {
-	entries, err := r.SpireClient.ListByParentID(ctx, &registration.ParentID{
-		Id: *r.myId,
-	})
-	if err != nil {
-		reqLogger.Error(err, "Failed to retrieve existing spire entry")
-		return "", err
-	}
-
-	selectorMap := map[string]map[string]bool{}
-	for _, sel := range selectors {
-		if _, ok := selectorMap[sel.Type]; !ok {
-			selectorMap[sel.Type] = make(map[string]bool)
-		}
-		selectorMap[sel.Type][sel.Value] = true
-	}
-entryLoop:
-	for _, entry := range entries.Entries {
-		if entry.GetSpiffeId() == id {
-			if len(entry.GetSelectors()) != len(selectors) {
-				continue entryLoop
-			}
-			for _, sel := range entry.GetSelectors() {
-				if _, ok := selectorMap[sel.Type]; !ok {
-					continue entryLoop
-				}
-				if _, ok := selectorMap[sel.Type][sel.Value]; !ok {
-					continue entryLoop
-				}
-			}
-			return entry.GetEntryId(), nil
-		}
-	}
-	return "", ExistingEntryNotFoundError
-}
-
 func (r *SpireEntryReconciler) getOrCreateSpireEntry(ctx context.Context, reqLogger logr.Logger, instance *spiffeidv1beta1.SpireEntry) (string, error) {
 
 	// TODO: sanitize!
@@ -286,27 +247,23 @@ func (r *SpireEntryReconciler) getOrCreateSpireEntry(ctx context.Context, reqLog
 
 	spiffeId := instance.Spec.SpiffeId
 
-	regEntryId, err := r.SpireClient.CreateEntry(ctx, &common.RegistrationEntry{
+	createEntryIfNotExistsResponse, err := r.SpireClient.CreateEntryIfNotExists(ctx, &common.RegistrationEntry{
 		Selectors: selectors,
 		ParentId:  *r.myId,
 		SpiffeId:  spiffeId,
 	})
 	if err != nil {
-		if status.Code(err) == codes.AlreadyExists {
-			entryId, err := r.getExistingEntry(ctx, reqLogger, spiffeId, selectors)
-			if err != nil {
-				reqLogger.Error(err, "Failed to reuse existing spire entry")
-				return "", err
-			}
-			reqLogger.Info("Found existing entry", "entryID", entryId, "spiffeID", spiffeId)
-			return entryId, nil
-		}
 		reqLogger.Error(err, "Failed to create spire entry")
 		return "", err
 	}
-	reqLogger.Info("Created entry", "entryID", regEntryId.Id, "spiffeID", spiffeId)
+	entryId := createEntryIfNotExistsResponse.Entry.EntryId
+	if createEntryIfNotExistsResponse.Preexisting {
+		reqLogger.Info("Found existing entry", "entryID", entryId, "spiffeID", spiffeId)
+	} else {
+		reqLogger.Info("Created entry", "entryID", entryId, "spiffeID", spiffeId)
+	}
 
-	return regEntryId.Id, nil
+	return entryId, nil
 
 }
 
