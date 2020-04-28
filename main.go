@@ -19,12 +19,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
+	"google.golang.org/grpc/credentials"
 	"os"
 
 	"github.com/go-logr/logr"
 	"github.com/spiffe/spire/proto/spire/api/registration"
 
-	"github.com/spiffe/go-spiffe/spiffe"
 	spiffeidv1beta1 "github.com/transferwise/spire-k8s-registrar/api/v1beta1"
 	"github.com/transferwise/spire-k8s-registrar/controllers"
 	"google.golang.org/grpc"
@@ -159,21 +161,25 @@ func ConnectSpire(ctx context.Context, log logr.Logger, serverAddress, serverSoc
 	var conn *grpc.ClientConn
 	var err error
 
+	serverSocketAddr := "unix://" + serverSocketPath
 	if serverAddress != "" {
-		tlsPeer, err := spiffe.NewTLSPeer(spiffe.WithWorkloadAPIAddr("unix://"+serverSocketPath), spiffe.WithLogger(SpiffeLogWrapper{log}))
+		source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithLogger(SpiffeLogWrapper{log}), workloadapi.WithAddr(serverSocketAddr)))
 		if err != nil {
+			log.Error(err, "Unable to setup X509 source")
 			return nil, err
 		}
-		conn, err = tlsPeer.DialGRPC(ctx, serverAddress, spiffe.ExpectAnyPeer())
-		if err != nil {
-			return nil, err
-		}
+
+		tlsConfig := tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeAny())
+
+		fmt.Printf("Connecting to: %s\n", serverAddress)
+		conn, err = grpc.DialContext(ctx, serverAddress, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else {
-		fmt.Printf("Connecting to: %s\n", "unix://"+serverSocketPath)
-		conn, err = grpc.DialContext(ctx, "unix://"+serverSocketPath, grpc.WithInsecure())
-		if err != nil {
-			return nil, err
-		}
+		fmt.Printf("Connecting to: %s\n", serverSocketAddr)
+		conn, err = grpc.DialContext(ctx, serverSocketAddr, grpc.WithInsecure())
+	}
+	if err != nil {
+		log.Error(err, "Unable to dial spire server")
+		return nil, err
 	}
 	spireClient := registration.NewRegistrationClient(conn)
 	return spireClient, nil
