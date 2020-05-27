@@ -17,10 +17,30 @@ package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+
+type Selector struct {
+	// Pod label names/values to match for this spiffe ID
+	PodLabel map[string]string `json:"podLabel,omitempty"`
+	// Pod names to match for this spiffe ID
+	PodName string `json:"podName,omitempty"`
+	// Pod UIDs to match for this spiffe ID
+	PodUid types.UID `json:"podUid,omitempty"`
+	// Namespace to match for this spiffe ID
+	Namespace string `json:"namespace,omitempty"`
+	// ServiceAccount to match for this spiffe ID
+	ServiceAccount string `json:"serviceAccount,omitempty"`
+	// ContainerImage to match
+	ContainerImage string `json:"containerImage,omitempty"`
+	// ContainerName to match
+	ContainerName string `json:"containerName,omitempty"`
+	// Arbitrary k8s selectors
+	Arbitrary []string `json:"arbitrary,omitempty"`
+}
 
 // ClusterSpiffeIDSpec defines the desired state of ClusterSpiffeID
 type ClusterSpiffeIDSpec struct {
@@ -35,6 +55,7 @@ type ClusterSpiffeIDSpec struct {
 type ClusterSpiffeIDStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	EntryId *string `json:"entryId,omitempty"`
 }
 
 // +kubebuilder:object:root=true

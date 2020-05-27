@@ -87,24 +87,17 @@ func main() {
 	}
 
 	if err = (&controllers.ClusterSpiffeIDReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("ClusterSpiffeID"),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ClusterSpiffeID")
-		os.Exit(1)
-	}
-	if err = (&controllers.SpireEntryReconciler{
 		Client:      mgr.GetClient(),
-		Log:         ctrl.Log.WithName("controllers").WithName("SpireEntry"),
+		Log:         ctrl.Log.WithName("controllers").WithName("ClusterSpiffeID"),
 		Scheme:      mgr.GetScheme(),
 		SpireClient: spireClient,
 		Cluster:     config.Cluster,
 		TrustDomain: config.TrustDomain,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SpireEntry")
+		setupLog.Error(err, "unable to create controller", "controller", "ClusterSpiffeID")
 		os.Exit(1)
 	}
+
 	if config.PodController {
 		mode := controllers.PodReconcilerModeServiceAccount
 		value := ""

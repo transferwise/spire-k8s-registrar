@@ -18,30 +18,29 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/go-logr/logr"
-	"hash"
-	"hash/fnv"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/spiffe/spire/proto/spire/api/registration"
+	"github.com/spiffe/spire/proto/spire/common"
+	spiffeidv1beta1 "github.com/transferwise/spire-k8s-registrar/api/v1beta1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/rand"
+	"net/url"
+	"path"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/source"
-
-	spiffeidv1beta1 "github.com/transferwise/spire-k8s-registrar/api/v1beta1"
 )
 
 // ClusterSpiffeIDReconciler reconciles a ClusterSpiffeID object
 type ClusterSpiffeIDReconciler struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
+	Log         logr.Logger
+	Scheme      *runtime.Scheme
+	myId        *string
+	SpireClient registration.RegistrationClient
+	TrustDomain string
+	Cluster     string
 }
 
 // +kubebuilder:rbac:groups=spiffeid.spiffe.io,resources=clusterspiffeids,verbs=get;list;watch;create;update;patch;delete
@@ -52,9 +51,16 @@ func (r *ClusterSpiffeIDReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	ctx := context.Background()
 	log := r.Log.WithValues("clusterspiffeid", req.NamespacedName)
 
-	var clusterSpiffeID spiffeidv1beta1.ClusterSpiffeID
-	if err := r.Get(ctx, req.NamespacedName, &clusterSpiffeID); err != nil {
-		if !errors.IsNotFound(err) {
+	if r.myId == nil {
+		if err := r.makeMyId(ctx, log); err != nil {
+			log.Error(err, "unable to create parent ID")
+			return ctrl.Result{}, err
+		}
+	}
+
+	var clusterSpiffeId spiffeidv1beta1.ClusterSpiffeID
+	if err := r.Get(ctx, req.NamespacedName, &clusterSpiffeId); err != nil {
+		if !k8serrors.IsNotFound(err) {
 			log.Error(err, "unable to fetch ClusterSpiffeID")
 		}
 		// we'll ignore not-found errors, since they can't be fixed by an immediate
@@ -63,53 +69,50 @@ func (r *ClusterSpiffeIDReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	entrySpec := spiffeidv1beta1.SpireEntrySpec{
-		SpiffeId: clusterSpiffeID.Spec.SpiffeId,
-		Selector: clusterSpiffeID.Spec.Selector,
+	myFinalizerName := "spire.finalizers.clusterspiffeid.spiffeid.spiffe.io"
+	if clusterSpiffeId.ObjectMeta.DeletionTimestamp.IsZero() {
+		if !containsString(clusterSpiffeId.GetFinalizers(), myFinalizerName) {
+			clusterSpiffeId.SetFinalizers(append(clusterSpiffeId.GetFinalizers(), myFinalizerName))
+			if err := r.Update(ctx, &clusterSpiffeId); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		if containsString(clusterSpiffeId.GetFinalizers(), myFinalizerName) {
+			// our finalizer is present, so lets handle any external dependency
+			if err := r.ensureDeleted(ctx, log, *clusterSpiffeId.Status.EntryId); err != nil {
+				log.Error(err, "unable to delete spire entry", "entryid", *clusterSpiffeId.Status.EntryId)
+				return ctrl.Result{}, err
+			}
+
+			// remove our finalizer from the list and update it.
+			clusterSpiffeId.SetFinalizers(removeString(clusterSpiffeId.GetFinalizers(), myFinalizerName))
+			if err := r.Update(ctx, &clusterSpiffeId); err != nil {
+				return ctrl.Result{}, err
+			}
+			log.Info("Finalized entry", "entry", clusterSpiffeId.Name)
+		}
+		return ctrl.Result{}, nil
 	}
 
-	// TODO: This wont cope with hash collisions at all...
-	spireEntrySpecHasher := fnv.New64a()
-	deepHashObject(spireEntrySpecHasher, entrySpec)
-	entryName := rand.SafeEncodeString(fmt.Sprint(spireEntrySpecHasher.Sum64()))
-
-	entry := spiffeidv1beta1.SpireEntry{
-		ObjectMeta: v1.ObjectMeta{
-			Labels:      make(map[string]string),
-			Annotations: make(map[string]string),
-			Name:        entryName,
-			Namespace:   req.Namespace,
-		},
-		Spec: entrySpec,
-	}
-	if err := controllerutil.SetControllerReference(&clusterSpiffeID, &entry, r.Scheme); err != nil {
-		log.Error(err, "Failed to set controller reference on new entry")
+	entryId, err := r.getOrCreateSpireEntry(ctx, log, &clusterSpiffeId)
+	if err != nil {
+		log.Error(err, "unable to create spire entry", "request", req)
 		return ctrl.Result{}, err
 	}
-	if err := r.Create(ctx, &entry); err != nil {
-		if !errors.IsAlreadyExists(err) {
-			log.Error(err, "unable to create SpireEntry")
-			return ctrl.Result{}, err
-		}
-		if err := r.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: entryName}, &entry); err != nil {
-			log.Error(err, "unable to fetch existing entry")
-			return ctrl.Result{}, err
-		}
-		if v1.GetControllerOf(&entry) != nil {
-			if err := addOwnerReference(&clusterSpiffeID, &entry, r.Scheme); err != nil {
-				log.Error(err, "Failed to set owner reference on existing entry")
+	oldEntryId := clusterSpiffeId.Status.EntryId
+	if oldEntryId == nil || *oldEntryId != entryId {
+		// We need to update the Status field
+		if oldEntryId != nil {
+			// entry resource must have been modified, delete the hanging one
+			if err := r.ensureDeleted(ctx, log, *clusterSpiffeId.Status.EntryId); err != nil {
+				log.Error(err, "unable to delete old spire entry", "entryid", *clusterSpiffeId.Status.EntryId)
 				return ctrl.Result{}, err
 			}
-			log.Info("adding owner reference on existing entry")
-		} else {
-			if err := controllerutil.SetControllerReference(&clusterSpiffeID, &entry, r.Scheme); err != nil {
-				log.Error(err, "Failed to set controller reference on existing entry")
-				return ctrl.Result{}, err
-			}
-			log.Info("updating controller ref on existing entry to take ownership")
 		}
-		if err := r.Update(ctx, &entry); err != nil {
-			log.Error(err, "Failed to update existing entry")
+		clusterSpiffeId.Status.EntryId = &entryId
+		if err := r.Status().Update(ctx, &clusterSpiffeId); err != nil {
+			log.Error(err, "unable to update ClusterSpiffeID status")
 			return ctrl.Result{}, err
 		}
 	}
@@ -117,66 +120,168 @@ func (r *ClusterSpiffeIDReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	return ctrl.Result{}, nil
 }
 
-func addOwnerReference(owner, object v1.Object, scheme *runtime.Scheme) error {
-	ro, ok := owner.(runtime.Object)
-	if !ok {
-		return fmt.Errorf("%T is not a runtime.Object, cannot call addOwnerReference", owner)
-	}
-
-	gvk, err := apiutil.GVKForObject(ro, scheme)
-	if err != nil {
-		return err
-	}
-
-	ref := v1.OwnerReference{
-		APIVersion: gvk.GroupVersion().String(),
-		Kind:       gvk.Kind,
-		Name:       owner.GetName(),
-		UID:        owner.GetUID(),
-	}
-
-	existingRefs := object.GetOwnerReferences()
-	for _, r := range existingRefs {
-		if referSameObject(ref, r) {
-			return nil
+func (r *ClusterSpiffeIDReconciler) ensureDeleted(ctx context.Context, reqLogger logr.Logger, entryId string) error {
+	if _, err := r.SpireClient.DeleteEntry(ctx, &registration.RegistrationEntryID{Id: entryId}); err != nil {
+		if status.Code(err) != codes.NotFound {
+			if status.Code(err) == codes.Internal {
+				// Spire server currently returns a 500 if delete fails due to the entry not existing. This is probably a bug.
+				// We work around it by attempting to fetch the entry, and if it's not found then all is good.
+				if _, err := r.SpireClient.FetchEntry(ctx, &registration.RegistrationEntryID{Id: entryId}); err != nil {
+					if status.Code(err) == codes.NotFound {
+						reqLogger.Info("Entry already deleted", "entry", entryId)
+						return nil
+					}
+				}
+			}
+			return err
 		}
 	}
-	existingRefs = append(existingRefs, ref)
-
-	// Update owner references
-	object.SetOwnerReferences(existingRefs)
+	reqLogger.Info("Deleted entry", "entry", entryId)
 	return nil
 }
 
-// Returns true if a and b point to the same object
-func referSameObject(a, b v1.OwnerReference) bool {
-	aGV, err := schema.ParseGroupVersion(a.APIVersion)
-	if err != nil {
-		return false
+// ServerURI creates a server SPIFFE URI given a trustDomain.
+func ServerURI(trustDomain string) *url.URL {
+	return &url.URL{
+		Scheme: "spiffe",
+		Host:   trustDomain,
+		Path:   path.Join("spire", "server"),
 	}
-
-	bGV, err := schema.ParseGroupVersion(b.APIVersion)
-	if err != nil {
-		return false
-	}
-
-	return aGV == bGV && a.Kind == b.Kind && a.Name == b.Name
 }
 
-func deepHashObject(hasher hash.Hash, objectToWrite interface{}) {
-	hasher.Reset()
-	printer := spew.ConfigState{
-		Indent:         " ",
-		SortKeys:       true,
-		DisableMethods: true,
-		SpewKeys:       true,
+// ServerID creates a server SPIFFE ID string given a trustDomain.
+func ServerID(trustDomain string) string {
+	return ServerURI(trustDomain).String()
+}
+
+func (r *ClusterSpiffeIDReconciler) makeID(pathFmt string, pathArgs ...interface{}) string {
+	id := url.URL{
+		Scheme: "spiffe",
+		Host:   r.TrustDomain,
+		Path:   path.Clean(fmt.Sprintf(pathFmt, pathArgs...)),
 	}
-	printer.Fprintf(hasher, "%#v", objectToWrite)
+	return id.String()
+}
+
+func (r *ClusterSpiffeIDReconciler) nodeID() string {
+	return r.makeID("spire-k8s-operator/%s/node", r.Cluster)
+}
+
+func (r *ClusterSpiffeIDReconciler) makeMyId(ctx context.Context, reqLogger logr.Logger) error {
+	myId := r.nodeID()
+	reqLogger.Info("Initializing operator parent ID.")
+	_, err := r.SpireClient.CreateEntry(ctx, &common.RegistrationEntry{
+		Selectors: []*common.Selector{
+			{Type: "k8s_psat", Value: fmt.Sprintf("cluster:%s", r.Cluster)},
+		},
+		ParentId: ServerID(r.TrustDomain),
+		SpiffeId: myId,
+	})
+	if err != nil {
+		if status.Code(err) != codes.AlreadyExists {
+			reqLogger.Info("Failed to create operator parent ID", "spiffeID", myId)
+			return err
+		}
+	}
+	reqLogger.Info("Initialized operator parent ID", "spiffeID", myId)
+	r.myId = &myId
+	return nil
+}
+
+func (r *ClusterSpiffeIDReconciler) getOrCreateSpireEntry(ctx context.Context, reqLogger logr.Logger, instance *spiffeidv1beta1.ClusterSpiffeID) (string, error) {
+
+	// TODO: sanitize!
+	selectors := make([]*common.Selector, 0, len(instance.Spec.Selector.PodLabel))
+	for k, v := range instance.Spec.Selector.PodLabel {
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("pod-label:%s:%s", k, v),
+		})
+	}
+	if len(instance.Spec.Selector.PodName) > 0 {
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("pod-name:%s", instance.Spec.Selector.PodName),
+		})
+	}
+	if len(instance.Spec.Selector.PodUid) > 0 {
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("pod-uid:%s", instance.Spec.Selector.PodUid),
+		})
+	}
+	if len(instance.Spec.Selector.Namespace) > 0 {
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("ns:%s", instance.Spec.Selector.Namespace),
+		})
+	}
+	if len(instance.Spec.Selector.ServiceAccount) > 0 {
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("sa:%s", instance.Spec.Selector.ServiceAccount),
+		})
+	}
+	if len(instance.Spec.Selector.ContainerName) > 0 {
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("container-name:%s", instance.Spec.Selector.ContainerName),
+		})
+	}
+	if len(instance.Spec.Selector.ContainerImage) > 0 {
+		selectors = append(selectors, &common.Selector{
+			Type:  "k8s",
+			Value: fmt.Sprintf("container-image:%s", instance.Spec.Selector.ContainerImage),
+		})
+	}
+	for _, v := range instance.Spec.Selector.Arbitrary {
+		selectors = append(selectors, &common.Selector{Type: "k8s", Value: v})
+	}
+
+	spiffeId := instance.Spec.SpiffeId
+
+	createEntryIfNotExistsResponse, err := r.SpireClient.CreateEntryIfNotExists(ctx, &common.RegistrationEntry{
+		Selectors: selectors,
+		ParentId:  *r.myId,
+		SpiffeId:  spiffeId,
+	})
+	if err != nil {
+		reqLogger.Error(err, "Failed to create spire entry")
+		return "", err
+	}
+	entryId := createEntryIfNotExistsResponse.Entry.EntryId
+	if createEntryIfNotExistsResponse.Preexisting {
+		reqLogger.Info("Found existing entry", "entryID", entryId, "spiffeID", spiffeId)
+	} else {
+		reqLogger.Info("Created entry", "entryID", entryId, "spiffeID", spiffeId)
+	}
+
+	return entryId, nil
+
+}
+
+// Helper functions to check and remove string from a slice of strings.
+func containsString(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+func removeString(slice []string, s string) (result []string) {
+	for _, item := range slice {
+		if item == s {
+			continue
+		}
+		result = append(result, item)
+	}
+	return
 }
 
 func (r *ClusterSpiffeIDReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&spiffeidv1beta1.ClusterSpiffeID{}).
-		Watches(&source.Kind{Type: &spiffeidv1beta1.SpireEntry{}}, &handler.EnqueueRequestForOwner{OwnerType: &spiffeidv1beta1.ClusterSpiffeID{}}).
 		Complete(r)
 }
