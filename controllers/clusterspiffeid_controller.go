@@ -44,7 +44,7 @@ type ClusterSpiffeIDReconciler struct {
 }
 
 var (
-    spireEntryIdKey = ".status.entryId"
+	spireEntryIdKey = ".status.entryId"
 )
 
 // +kubebuilder:rbac:groups=spiffeid.spiffe.io,resources=clusterspiffeids,verbs=get;list;watch;create;update;patch;delete
@@ -140,7 +140,6 @@ func (r *ClusterSpiffeIDReconciler) safeDelete(ctx context.Context, reqLogger lo
 	}
 	return nil
 }
-
 
 func (r *ClusterSpiffeIDReconciler) ensureDeleted(ctx context.Context, reqLogger logr.Logger, entryId string) error {
 	if _, err := r.SpireClient.DeleteEntry(ctx, &registration.RegistrationEntryID{Id: entryId}); err != nil {
@@ -304,16 +303,16 @@ func removeString(slice []string, s string) (result []string) {
 
 func (r *ClusterSpiffeIDReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
-    if err := mgr.GetFieldIndexer().IndexField(&spiffeidv1beta1.ClusterSpiffeID{}, spireEntryIdKey, func(rawObj runtime.Object) []string {
-        // grab the job object, extract the owner...
-        clusterSpiffeId := rawObj.(*spiffeidv1beta1.ClusterSpiffeID)
-        if clusterSpiffeId.Status.EntryId == nil {
-        	return nil
+	if err := mgr.GetFieldIndexer().IndexField(&spiffeidv1beta1.ClusterSpiffeID{}, spireEntryIdKey, func(rawObj runtime.Object) []string {
+		// grab the job object, extract the owner...
+		clusterSpiffeId := rawObj.(*spiffeidv1beta1.ClusterSpiffeID)
+		if clusterSpiffeId.Status.EntryId == nil {
+			return nil
 		}
 		return []string{*clusterSpiffeId.Status.EntryId}
-    }); err != nil {
-        return err
-    }
+	}); err != nil {
+		return err
+	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&spiffeidv1beta1.ClusterSpiffeID{}).
