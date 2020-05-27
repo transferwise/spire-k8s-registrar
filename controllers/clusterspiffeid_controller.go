@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/status"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"net/url"
 	"path"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -84,7 +85,7 @@ func (r *ClusterSpiffeIDReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	} else {
 		if containsString(clusterSpiffeId.GetFinalizers(), myFinalizerName) {
 			// our finalizer is present, so lets handle any external dependency
-			if err := r.safeDelete(ctx, log, *clusterSpiffeId.Status.EntryId); err != nil {
+			if err := r.safeDelete(ctx, log, *clusterSpiffeId.Status.EntryId, clusterSpiffeId.GetUID()); err != nil {
 				log.Error(err, "unable to delete spire entry", "entryid", *clusterSpiffeId.Status.EntryId)
 				return ctrl.Result{}, err
 			}
@@ -108,35 +109,36 @@ func (r *ClusterSpiffeIDReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	if oldEntryId == nil || *oldEntryId != entryId {
 		// We need to update the Status field
 		clusterSpiffeId.Status.EntryId = &entryId
-		if err := r.Status().Update(ctx, &clusterSpiffeId); err != nil {
-			log.Error(err, "unable to update ClusterSpiffeID status")
-			return ctrl.Result{}, err
-		}
 		if oldEntryId != nil {
 			// entry resource must have been modified, delete the hanging one
-			if err := r.safeDelete(ctx, log, *clusterSpiffeId.Status.EntryId); err != nil {
+			if err := r.safeDelete(ctx, log, *clusterSpiffeId.Status.EntryId, clusterSpiffeId.GetUID()); err != nil {
 				log.Error(err, "unable to delete old spire entry", "entryid", *clusterSpiffeId.Status.EntryId)
 				return ctrl.Result{}, err
 			}
+		}
+		if err := r.Status().Update(ctx, &clusterSpiffeId); err != nil {
+			log.Error(err, "unable to update ClusterSpiffeID status")
+			return ctrl.Result{}, err
 		}
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (r *ClusterSpiffeIDReconciler) safeDelete(ctx context.Context, reqLogger logr.Logger, entryId string) error {
+func (r *ClusterSpiffeIDReconciler) safeDelete(ctx context.Context, reqLogger logr.Logger, entryId string, myUid types.UID) error {
 	var siblings spiffeidv1beta1.ClusterSpiffeIDList
 	if err := r.List(ctx, &siblings, client.MatchingFields{spireEntryIdKey: entryId}); err != nil {
 		reqLogger.Error(err, "unable to list IDs that potentially share our entry")
 		return err
 	}
-	if len(siblings.Items) == 0 {
-		if err := r.ensureDeleted(ctx, reqLogger, entryId); err != nil {
-			reqLogger.Error(err, "unable to delete unused spire entry", "entry", entryId)
-			return err
-		}
-	} else {
-		reqLogger.Info("Spire entry still in use by other resources.", "entry", entryId, "numUsers", len(siblings.Items))
+	numSiblings := len(siblings.Items)
+	if numSiblings > 1 || (numSiblings == 1 && siblings.Items[0].GetUID() != myUid) {
+		reqLogger.Info("Spire entry still in use by other resources.", "entry", entryId, "references", numSiblings)
+		return nil
+	}
+	if err := r.ensureDeleted(ctx, reqLogger, entryId); err != nil {
+		reqLogger.Error(err, "unable to delete unused spire entry", "entry", entryId)
+		return err
 	}
 	return nil
 }
