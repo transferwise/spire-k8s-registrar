@@ -43,6 +43,10 @@ type ClusterSpiffeIDReconciler struct {
 	Cluster     string
 }
 
+var (
+    spireEntryIdKey = ".status.entryId"
+)
+
 // +kubebuilder:rbac:groups=spiffeid.spiffe.io,resources=clusterspiffeids,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=spiffeid.spiffe.io,resources=spireentries,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=spiffeid.spiffe.io,resources=clusterspiffeids/status,verbs=get;update;patch
@@ -80,7 +84,7 @@ func (r *ClusterSpiffeIDReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	} else {
 		if containsString(clusterSpiffeId.GetFinalizers(), myFinalizerName) {
 			// our finalizer is present, so lets handle any external dependency
-			if err := r.ensureDeleted(ctx, log, *clusterSpiffeId.Status.EntryId); err != nil {
+			if err := r.safeDelete(ctx, log, *clusterSpiffeId.Status.EntryId); err != nil {
 				log.Error(err, "unable to delete spire entry", "entryid", *clusterSpiffeId.Status.EntryId)
 				return ctrl.Result{}, err
 			}
@@ -103,22 +107,40 @@ func (r *ClusterSpiffeIDReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	oldEntryId := clusterSpiffeId.Status.EntryId
 	if oldEntryId == nil || *oldEntryId != entryId {
 		// We need to update the Status field
-		if oldEntryId != nil {
-			// entry resource must have been modified, delete the hanging one
-			if err := r.ensureDeleted(ctx, log, *clusterSpiffeId.Status.EntryId); err != nil {
-				log.Error(err, "unable to delete old spire entry", "entryid", *clusterSpiffeId.Status.EntryId)
-				return ctrl.Result{}, err
-			}
-		}
 		clusterSpiffeId.Status.EntryId = &entryId
 		if err := r.Status().Update(ctx, &clusterSpiffeId); err != nil {
 			log.Error(err, "unable to update ClusterSpiffeID status")
 			return ctrl.Result{}, err
 		}
+		if oldEntryId != nil {
+			// entry resource must have been modified, delete the hanging one
+			if err := r.safeDelete(ctx, log, *clusterSpiffeId.Status.EntryId); err != nil {
+				log.Error(err, "unable to delete old spire entry", "entryid", *clusterSpiffeId.Status.EntryId)
+				return ctrl.Result{}, err
+			}
+		}
 	}
 
 	return ctrl.Result{}, nil
 }
+
+func (r *ClusterSpiffeIDReconciler) safeDelete(ctx context.Context, reqLogger logr.Logger, entryId string) error {
+	var siblings spiffeidv1beta1.ClusterSpiffeIDList
+	if err := r.List(ctx, &siblings, client.MatchingFields{spireEntryIdKey: entryId}); err != nil {
+		reqLogger.Error(err, "unable to list IDs that potentially share our entry")
+		return err
+	}
+	if len(siblings.Items) == 0 {
+		if err := r.ensureDeleted(ctx, reqLogger, entryId); err != nil {
+			reqLogger.Error(err, "unable to delete unused spire entry", "entry", entryId)
+			return err
+		}
+	} else {
+		reqLogger.Info("Spire entry still in use by other resources.", "entry", entryId, "numUsers", len(siblings.Items))
+	}
+	return nil
+}
+
 
 func (r *ClusterSpiffeIDReconciler) ensureDeleted(ctx context.Context, reqLogger logr.Logger, entryId string) error {
 	if _, err := r.SpireClient.DeleteEntry(ctx, &registration.RegistrationEntryID{Id: entryId}); err != nil {
@@ -281,6 +303,18 @@ func removeString(slice []string, s string) (result []string) {
 }
 
 func (r *ClusterSpiffeIDReconciler) SetupWithManager(mgr ctrl.Manager) error {
+
+    if err := mgr.GetFieldIndexer().IndexField(&spiffeidv1beta1.ClusterSpiffeID{}, spireEntryIdKey, func(rawObj runtime.Object) []string {
+        // grab the job object, extract the owner...
+        clusterSpiffeId := rawObj.(*spiffeidv1beta1.ClusterSpiffeID)
+        if clusterSpiffeId.Status.EntryId == nil {
+        	return nil
+		}
+		return []string{*clusterSpiffeId.Status.EntryId}
+    }); err != nil {
+        return err
+    }
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&spiffeidv1beta1.ClusterSpiffeID{}).
 		Complete(r)
