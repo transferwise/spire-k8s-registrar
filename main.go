@@ -19,14 +19,17 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/spiffe/spire/proto/spire/common"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"net/url"
 	"os"
+	"path"
 
 	"github.com/go-logr/logr"
 	"github.com/spiffe/spire/proto/spire/api/registration"
 
 	"github.com/spiffe/go-spiffe/spiffe"
-	spiffeidv1beta1 "github.com/transferwise/spire-k8s-registrar/api/v1beta1"
-	"github.com/transferwise/spire-k8s-registrar/controllers"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -35,6 +38,9 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	spiffeidv1beta1 "github.com/transferwise/spire-k8s-registrar/api/v1beta1"
+	"github.com/transferwise/spire-k8s-registrar/controllers"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -74,6 +80,12 @@ func main() {
 	}
 	setupLog.Info("Connected to spire server.")
 
+	myId, err := makeMyId(context.Background(), setupLog, spireClient, config.Cluster, config.TrustDomain)
+	if err != nil {
+		setupLog.Error(err, "unable to create parent ID")
+		os.Exit(1)
+	}
+
 	// Setup all Controllers
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:             scheme,
@@ -91,8 +103,7 @@ func main() {
 		Log:         ctrl.Log.WithName("controllers").WithName("ClusterSpiffeID"),
 		Scheme:      mgr.GetScheme(),
 		SpireClient: spireClient,
-		Cluster:     config.Cluster,
-		TrustDomain: config.TrustDomain,
+		MyId:        myId,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterSpiffeID")
 		os.Exit(1)
@@ -120,6 +131,16 @@ func main() {
 			setupLog.Error(err, "unable to create controller", "controller", "Pod")
 			os.Exit(1)
 		}
+	}
+	if err = (&controllers.SpireEntryReconciler{
+		Client:      mgr.GetClient(),
+		Log:         ctrl.Log.WithName("controllers").WithName("SpireEntry"),
+		Scheme:      mgr.GetScheme(),
+		SpireClient: spireClient,
+		MyId:        myId,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "SpireEntry")
+		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
 
@@ -170,4 +191,51 @@ func ConnectSpire(ctx context.Context, log logr.Logger, serverAddress, serverSoc
 	}
 	spireClient := registration.NewRegistrationClient(conn)
 	return spireClient, nil
+}
+
+// ServerURI creates a server SPIFFE URI given a trustDomain.
+func ServerURI(trustDomain string) *url.URL {
+	return &url.URL{
+		Scheme: "spiffe",
+		Host:   trustDomain,
+		Path:   path.Join("spire", "server"),
+	}
+}
+
+// ServerID creates a server SPIFFE ID string given a trustDomain.
+func ServerID(trustDomain string) string {
+	return ServerURI(trustDomain).String()
+}
+
+func makeID(trustDomain string, pathFmt string, pathArgs ...interface{}) string {
+	id := url.URL{
+		Scheme: "spiffe",
+		Host:   trustDomain,
+		Path:   path.Clean(fmt.Sprintf(pathFmt, pathArgs...)),
+	}
+	return id.String()
+}
+
+func nodeID(trustDomain string, cluster string) string {
+	return makeID(trustDomain, "spire-k8s-operator/%s/node", cluster)
+}
+
+func makeMyId(ctx context.Context, reqLogger logr.Logger, spireClient registration.RegistrationClient, cluster string, trustDomain string) (string, error) {
+	myId := nodeID(trustDomain, cluster)
+	reqLogger.Info("Initializing operator parent ID.")
+	_, err := spireClient.CreateEntry(ctx, &common.RegistrationEntry{
+		Selectors: []*common.Selector{
+			{Type: "k8s_psat", Value: fmt.Sprintf("cluster:%s", cluster)},
+		},
+		ParentId: ServerID(trustDomain),
+		SpiffeId: myId,
+	})
+	if err != nil {
+		if status.Code(err) != codes.AlreadyExists {
+			reqLogger.Info("Failed to create operator parent ID", "spiffeID", myId)
+			return "", err
+		}
+	}
+	reqLogger.Info("Initialized operator parent ID", "spiffeID", myId)
+	return myId, nil
 }

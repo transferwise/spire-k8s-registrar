@@ -1,0 +1,20 @@
+# permissions for end users to view spireentries.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spireentry-viewer-role
+rules:
+- apiGroups:
+  - spiffeid.io.spiffe
+  resources:
+  - spireentries
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - spiffeid.io.spiffe
+  resources:
+  - spireentries/status
+  verbs:
+  - get

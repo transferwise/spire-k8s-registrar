@@ -27,10 +27,11 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"net/url"
-	"path"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 // ClusterSpiffeIDReconciler reconciles a ClusterSpiffeID object
@@ -38,10 +39,8 @@ type ClusterSpiffeIDReconciler struct {
 	client.Client
 	Log         logr.Logger
 	Scheme      *runtime.Scheme
-	myId        *string
+	MyId        string
 	SpireClient registration.RegistrationClient
-	TrustDomain string
-	Cluster     string
 }
 
 var (
@@ -55,13 +54,6 @@ var (
 func (r *ClusterSpiffeIDReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
 	log := r.Log.WithValues("clusterspiffeid", req.NamespacedName)
-
-	if r.myId == nil {
-		if err := r.makeMyId(ctx, log); err != nil {
-			log.Error(err, "unable to create parent ID")
-			return ctrl.Result{}, err
-		}
-	}
 
 	var clusterSpiffeId spiffeidv1beta1.ClusterSpiffeID
 	if err := r.Get(ctx, req.NamespacedName, &clusterSpiffeId); err != nil {
@@ -111,7 +103,7 @@ func (r *ClusterSpiffeIDReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		clusterSpiffeId.Status.EntryId = &entryId
 		if oldEntryId != nil {
 			// entry resource must have been modified, delete the hanging one
-			if err := r.safeDelete(ctx, log, *clusterSpiffeId.Status.EntryId, clusterSpiffeId.GetUID()); err != nil {
+			if err := r.safeDelete(ctx, log, *oldEntryId, clusterSpiffeId.GetUID()); err != nil {
 				log.Error(err, "unable to delete old spire entry", "entryid", *clusterSpiffeId.Status.EntryId)
 				return ctrl.Result{}, err
 			}
@@ -160,54 +152,6 @@ func (r *ClusterSpiffeIDReconciler) ensureDeleted(ctx context.Context, reqLogger
 		}
 	}
 	reqLogger.Info("Deleted entry", "entry", entryId)
-	return nil
-}
-
-// ServerURI creates a server SPIFFE URI given a trustDomain.
-func ServerURI(trustDomain string) *url.URL {
-	return &url.URL{
-		Scheme: "spiffe",
-		Host:   trustDomain,
-		Path:   path.Join("spire", "server"),
-	}
-}
-
-// ServerID creates a server SPIFFE ID string given a trustDomain.
-func ServerID(trustDomain string) string {
-	return ServerURI(trustDomain).String()
-}
-
-func (r *ClusterSpiffeIDReconciler) makeID(pathFmt string, pathArgs ...interface{}) string {
-	id := url.URL{
-		Scheme: "spiffe",
-		Host:   r.TrustDomain,
-		Path:   path.Clean(fmt.Sprintf(pathFmt, pathArgs...)),
-	}
-	return id.String()
-}
-
-func (r *ClusterSpiffeIDReconciler) nodeID() string {
-	return r.makeID("spire-k8s-operator/%s/node", r.Cluster)
-}
-
-func (r *ClusterSpiffeIDReconciler) makeMyId(ctx context.Context, reqLogger logr.Logger) error {
-	myId := r.nodeID()
-	reqLogger.Info("Initializing operator parent ID.")
-	_, err := r.SpireClient.CreateEntry(ctx, &common.RegistrationEntry{
-		Selectors: []*common.Selector{
-			{Type: "k8s_psat", Value: fmt.Sprintf("cluster:%s", r.Cluster)},
-		},
-		ParentId: ServerID(r.TrustDomain),
-		SpiffeId: myId,
-	})
-	if err != nil {
-		if status.Code(err) != codes.AlreadyExists {
-			reqLogger.Info("Failed to create operator parent ID", "spiffeID", myId)
-			return err
-		}
-	}
-	reqLogger.Info("Initialized operator parent ID", "spiffeID", myId)
-	r.myId = &myId
 	return nil
 }
 
@@ -265,7 +209,7 @@ func (r *ClusterSpiffeIDReconciler) getOrCreateSpireEntry(ctx context.Context, r
 
 	createEntryIfNotExistsResponse, err := r.SpireClient.CreateEntryIfNotExists(ctx, &common.RegistrationEntry{
 		Selectors: selectors,
-		ParentId:  *r.myId,
+		ParentId:  r.MyId,
 		SpiffeId:  spiffeId,
 	})
 	if err != nil {
@@ -304,7 +248,6 @@ func removeString(slice []string, s string) (result []string) {
 }
 
 func (r *ClusterSpiffeIDReconciler) SetupWithManager(mgr ctrl.Manager) error {
-
 	if err := mgr.GetFieldIndexer().IndexField(&spiffeidv1beta1.ClusterSpiffeID{}, spireEntryIdKey, func(rawObj runtime.Object) []string {
 		// grab the job object, extract the owner...
 		clusterSpiffeId := rawObj.(*spiffeidv1beta1.ClusterSpiffeID)
@@ -318,5 +261,20 @@ func (r *ClusterSpiffeIDReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&spiffeidv1beta1.ClusterSpiffeID{}).
+		Watches(&source.Kind{Type: &spiffeidv1beta1.SpireEntry{}}, &handler.EnqueueRequestsFromMapFunc{
+			ToRequests: handler.ToRequestsFunc(func(o handler.MapObject) []reconcile.Request {
+				var resources spiffeidv1beta1.ClusterSpiffeIDList
+				if err := r.List(context.Background(), &resources, client.MatchingFields{spireEntryIdKey: o.Meta.GetName()}); err != nil {
+					return nil
+				}
+				req := make([]reconcile.Request, len(resources.Items))
+				for i, resource := range resources.Items {
+					req[i] = reconcile.Request{
+							NamespacedName: types.NamespacedName{Namespace: resource.GetNamespace(), Name: resource.GetName()},
+					}
+				}
+				return req
+			}),
+		}).
 		Complete(r)
 }

@@ -4,6 +4,7 @@
 resources:
 - bases/spiffeid.spiffe.io_clusterspiffeids.yaml
 - bases/spiffeid.spiffe.io_spireentries.yaml
+- bases/spiffeid.io.spiffe_spireentries.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patchesStrategicMerge:
