@@ -39,7 +39,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	spiffeidv1beta1 "github.com/transferwise/spire-k8s-registrar/api/v1beta1"
 	"github.com/transferwise/spire-k8s-registrar/controllers"
 	// +kubebuilder:scaffold:imports
 )
@@ -53,7 +52,6 @@ var (
 func init() {
 	_ = clientgoscheme.AddToScheme(scheme)
 
-	_ = spiffeidv1beta1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
 	// +kubebuilder:scaffold:scheme
 }
@@ -98,50 +96,30 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.ClusterSpiffeIDReconciler{
+	mode := controllers.PodReconcilerModeServiceAccount
+	value := ""
+	if len(config.PodLabel) > 0 {
+		mode = controllers.PodReconcilerModeLabel
+		value = config.PodLabel
+	}
+	if len(config.PodAnnotation) > 0 {
+		mode = controllers.PodReconcilerModeAnnotation
+		value = config.PodAnnotation
+	}
+	if err = (&controllers.PodReconciler{
 		Client:      mgr.GetClient(),
-		Log:         ctrl.Log.WithName("controllers").WithName("ClusterSpiffeID"),
+		Log:         ctrl.Log.WithName("controllers").WithName("Pod"),
 		Scheme:      mgr.GetScheme(),
+		TrustDomain: config.TrustDomain,
+		Mode:        mode,
+		Value:       value,
 		SpireClient: spireClient,
 		MyId:        myId,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ClusterSpiffeID")
+		setupLog.Error(err, "unable to create controller", "controller", "Pod")
 		os.Exit(1)
 	}
 
-	if config.PodController {
-		mode := controllers.PodReconcilerModeServiceAccount
-		value := ""
-		if len(config.PodLabel) > 0 {
-			mode = controllers.PodReconcilerModeLabel
-			value = config.PodLabel
-		}
-		if len(config.PodAnnotation) > 0 {
-			mode = controllers.PodReconcilerModeAnnotation
-			value = config.PodAnnotation
-		}
-		if err = (&controllers.PodReconciler{
-			Client:      mgr.GetClient(),
-			Log:         ctrl.Log.WithName("controllers").WithName("Pod"),
-			Scheme:      mgr.GetScheme(),
-			TrustDomain: config.TrustDomain,
-			Mode:        mode,
-			Value:       value,
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "Pod")
-			os.Exit(1)
-		}
-	}
-	if err = (&controllers.SpireEntryReconciler{
-		Client:      mgr.GetClient(),
-		Log:         ctrl.Log.WithName("controllers").WithName("SpireEntry"),
-		Scheme:      mgr.GetScheme(),
-		SpireClient: spireClient,
-		MyId:        myId,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SpireEntry")
-		os.Exit(1)
-	}
 	// +kubebuilder:scaffold:builder
 
 	setupLog.Info("starting manager")
@@ -217,7 +195,7 @@ func makeID(trustDomain string, pathFmt string, pathArgs ...interface{}) string 
 }
 
 func nodeID(trustDomain string, cluster string) string {
-	return makeID(trustDomain, "spire-k8s-operator/%s/node", cluster)
+	return makeID(trustDomain, "spire-k8s-operatorz/%s/node", cluster)
 }
 
 func makeMyId(ctx context.Context, reqLogger logr.Logger, spireClient registration.RegistrationClient, cluster string, trustDomain string) (string, error) {
