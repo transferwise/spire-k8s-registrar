@@ -59,11 +59,11 @@ type PodReconciler struct {
 	SpireClient registration.RegistrationClient
 }
 
-type SelectorSubType string
+type WorkloadSelectorSubType string
 
 const (
-	NamespaceSelector SelectorSubType = "ns"
-	PodNameSelector                   = "pod-name"
+	PodNamespaceSelector WorkloadSelectorSubType = "ns"
+	PodNameSelector                              = "pod-name"
 )
 
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
@@ -99,8 +99,8 @@ func (r *PodReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	createEntryIfNotExistsResponse, err := r.SpireClient.CreateEntryIfNotExists(ctx, &common.RegistrationEntry{
 		Selectors: []*common.Selector{
-			K8sSelector(NamespaceSelector, pod.Namespace),
-			K8sSelector(PodNameSelector, pod.Name),
+			r.k8sWorkloadSelector(PodNamespaceSelector, pod.Namespace),
+			r.k8sWorkloadSelector(PodNameSelector, pod.Name),
 		},
 		ParentId: r.MyId,
 		SpiffeId: spiffeId,
@@ -143,8 +143,8 @@ func (r *PodReconciler) deleteAllEntriesExcept(ctx context.Context, reqLogger lo
 func (r *PodReconciler) getEntriesMatchingPod(ctx context.Context, reqLogger logr.Logger, podNamespacedName types.NamespacedName) ([]string, error) {
 	entries, err := r.SpireClient.ListBySelectors(ctx, &common.Selectors{
 		Entries: []*common.Selector{
-			K8sSelector(NamespaceSelector, podNamespacedName.Namespace),
-			K8sSelector(PodNameSelector, podNamespacedName.Name),
+			r.k8sWorkloadSelector(PodNamespaceSelector, podNamespacedName.Namespace),
+			r.k8sWorkloadSelector(PodNameSelector, podNamespacedName.Name),
 		},
 	})
 	if err != nil {
@@ -177,7 +177,7 @@ func (r *PodReconciler) makeSpiffeIdForPod(pod *corev1.Pod) string {
 	return spiffeId
 }
 
-func K8sSelector(selector SelectorSubType, value string) *common.Selector {
+func (r *PodReconciler) k8sWorkloadSelector(selector WorkloadSelectorSubType, value string) *common.Selector {
 	return &common.Selector{
 		Type:  "k8s",
 		Value: fmt.Sprintf("%s:%s", selector, value),
@@ -204,15 +204,15 @@ func (r *PodReconciler) ensureDeleted(ctx context.Context, reqLogger logr.Logger
 	return nil
 }
 
-func selectorsToNamespacedName(selectors []*common.Selector) *types.NamespacedName {
+func (r *PodReconciler) selectorsToNamespacedName(selectors []*common.Selector) *types.NamespacedName {
 	podNamespace := ""
 	podName := ""
 	for _, selector := range selectors {
 		if selector.Type == "k8s" {
 			splitted := strings.SplitN(selector.Value, ":", 1)
 			if len(splitted) > 1 {
-				switch SelectorSubType(splitted[0]) {
-				case NamespaceSelector:
+				switch WorkloadSelectorSubType(splitted[0]) {
+				case PodNamespaceSelector:
 					podNamespace = splitted[1]
 					break
 				case PodNameSelector:
@@ -248,7 +248,7 @@ func (r *PodReconciler) pollSpire(out chan event.GenericEvent, s <-chan struct{}
 			}
 			seen := make(map[string]bool)
 			for _, entry := range entries.Entries {
-				if namespacedName := selectorsToNamespacedName(entry.Selectors); namespacedName != nil {
+				if namespacedName := r.selectorsToNamespacedName(entry.Selectors); namespacedName != nil {
 					reconcile := false
 					if seen[namespacedName.String()] {
 						// More than one entry found
@@ -284,13 +284,13 @@ func (r *PodReconciler) pollSpire(out chan event.GenericEvent, s <-chan struct{}
 	}
 }
 
-type SpirePoller struct {
+type SpirePodEntryPoller struct {
 	r   *PodReconciler
 	out chan event.GenericEvent
 }
 
 // Start implements Runnable
-func (p *SpirePoller) Start(s <-chan struct{}) error {
+func (p *SpirePodEntryPoller) Start(s <-chan struct{}) error {
 	return p.r.pollSpire(p.out, s)
 }
 
@@ -298,7 +298,7 @@ func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	events := make(chan event.GenericEvent)
 
-	err := mgr.Add(&SpirePoller{
+	err := mgr.Add(&SpirePodEntryPoller{
 		r:   r,
 		out: events,
 	})
