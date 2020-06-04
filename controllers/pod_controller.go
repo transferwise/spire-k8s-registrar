@@ -43,7 +43,7 @@ type PodReconciler struct {
 	TrustDomain string
 	Mode        PodReconcilerMode
 	Value       string
-	MyId        string
+	RootId      string
 	SpireClient registration.RegistrationClient
 }
 
@@ -55,23 +55,6 @@ const (
 )
 
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
-
-func (r *PodReconciler) makeSpiffeIdForPod(pod *corev1.Pod) string {
-	spiffeId := ""
-	switch r.Mode {
-	case PodReconcilerModeServiceAccount:
-		spiffeId = r.makeID(r.TrustDomain, "ns/%s/sa/%s", pod.Namespace, pod.Spec.ServiceAccountName)
-	case PodReconcilerModeLabel:
-		if val, ok := pod.GetLabels()[r.Value]; ok {
-			spiffeId = r.makeID("%s", val)
-		}
-	case PodReconcilerModeAnnotation:
-		if val, ok := pod.GetAnnotations()[r.Value]; ok {
-			spiffeId = r.makeID("%s", val)
-		}
-	}
-	return spiffeId
-}
 
 func (r *PodReconciler) k8sWorkloadSelector(selector WorkloadSelectorSubType, value string) *common.Selector {
 	return &common.Selector{
@@ -107,6 +90,27 @@ func (r *PodReconciler) selectorsToNamespacedName(selectors []*common.Selector) 
 	return nil
 }
 
+func (r *PodReconciler) makeSpiffeId(obj ObjectWithMetadata) string {
+	return r.makeSpiffeIdForPod(obj.(*corev1.Pod))
+}
+
+func (r *PodReconciler) makeSpiffeIdForPod(pod *corev1.Pod) string {
+	spiffeId := ""
+	switch r.Mode {
+	case PodReconcilerModeServiceAccount:
+		spiffeId = r.makeID(r.TrustDomain, "ns/%s/sa/%s", pod.Namespace, pod.Spec.ServiceAccountName)
+	case PodReconcilerModeLabel:
+		if val, ok := pod.GetLabels()[r.Value]; ok {
+			spiffeId = r.makeID("%s", val)
+		}
+	case PodReconcilerModeAnnotation:
+		if val, ok := pod.GetAnnotations()[r.Value]; ok {
+			spiffeId = r.makeID("%s", val)
+		}
+	}
+	return spiffeId
+}
+
 func (r *PodReconciler) makeID(pathFmt string, pathArgs ...interface{}) string {
 	id := url.URL{
 		Scheme: "spiffe",
@@ -116,16 +120,12 @@ func (r *PodReconciler) makeID(pathFmt string, pathArgs ...interface{}) string {
 	return id.String()
 }
 
-func (r *PodReconciler) makeSpiffeId(obj ObjectWithMetadata) string {
-	return r.makeSpiffeIdForPod(obj.(*corev1.Pod))
-}
-
 func (r *PodReconciler) makeParentIdForPod(pod *corev1.Pod) string {
 	nodeName := pod.Spec.NodeName
 	if nodeName == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s/%s", r.MyId, nodeName)
+	return fmt.Sprintf("%s/%s", r.RootId, nodeName)
 }
 
 func (r *PodReconciler) makeParentId(obj ObjectWithMetadata) string {
@@ -140,7 +140,7 @@ func (r *PodReconciler) getSelectors(namespacedName types.NamespacedName) []*com
 }
 
 func (r *PodReconciler) getAllEntries(ctx context.Context) ([]*common.RegistrationEntry, error) {
-	nodeEntries, err := r.SpireClient.ListByParentID(ctx, &registration.ParentID{Id: r.MyId})
+	nodeEntries, err := r.SpireClient.ListByParentID(ctx, &registration.ParentID{Id: r.RootId})
 	if err != nil {
 		return nil, err
 	}
@@ -159,16 +159,16 @@ func (r *PodReconciler) getObject() ObjectWithMetadata {
 	return &corev1.Pod{}
 }
 
-func NewPodReconciler(client client.Client, log logr.Logger, scheme *runtime.Scheme, trustDomain string, myId string, spireClient registration.RegistrationClient, mode PodReconcilerMode, value string) *BaseReconciler {
+func NewPodReconciler(client client.Client, log logr.Logger, scheme *runtime.Scheme, trustDomain string, rootId string, spireClient registration.RegistrationClient, mode PodReconcilerMode, value string) *BaseReconciler {
 	return &BaseReconciler{
 		Client:      client,
 		Scheme:      scheme,
 		TrustDomain: trustDomain,
-		MyId:        myId,
+		RootId:      rootId,
 		SpireClient: spireClient,
 		Log:         log,
-		ObjectReconcilier: &PodReconciler{
-			MyId:        myId,
+		ObjectReconciler: &PodReconciler{
+			RootId:      rootId,
 			SpireClient: spireClient,
 			TrustDomain: trustDomain,
 			Mode:        mode,

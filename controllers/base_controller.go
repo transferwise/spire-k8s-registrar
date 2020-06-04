@@ -36,22 +36,34 @@ import (
 	"time"
 )
 
-type ObjectReconcilier interface {
-	makeSpiffeId(ObjectWithMetadata) string
-	makeParentId(ObjectWithMetadata) string
-	getSelectors(types.NamespacedName) []*common.Selector
-	getAllEntries(context.Context) ([]*common.RegistrationEntry, error)
-	selectorsToNamespacedName([]*common.Selector) *types.NamespacedName
+type ObjectReconciler interface {
+	// Returns an instance of the object type to be reconciled
 	getObject() ObjectWithMetadata
+	// Return a SPIFFE ID to register for the object, or "" if no registration should be created
+	makeSpiffeId(ObjectWithMetadata) string
+	// Return the SPIFFE ID to be used as a parent for the object, or "" if no registration should be created
+	makeParentId(ObjectWithMetadata) string
+	// Return all registration entries owned by the controller
+	getAllEntries(context.Context) ([]*common.RegistrationEntry, error)
+	// Return the selectors that should be used for a name
+	// For example, given a name of "foo" a reconciler might return a `k8s_psat:node-name:foo` selector.
+	getSelectors(types.NamespacedName) []*common.Selector
+	// Parse the selectors to extract a namespaced name.
+	// For example, a list containing a `k8s_psat:node-name:foo` selector might result in a NamespacedName of "foo"
+	selectorsToNamespacedName([]*common.Selector) *types.NamespacedName
 }
 
 // BaseReconciler reconciles... something
+// This implements the polling solution documented here: https://docs.google.com/document/d/19BDGrCRh9rjj09to1D2hlDJZXRuwOlY4hL5c4n7_bVc
+// By using name+namespace as a key we are able to maintain a 1:1 mapping from k8s resources to SPIRE registration entries.
+// The base reconciler implements the common functionality required to maintain that mapping, including a watcher on the
+// given resource, and a watcher which receives notifications from polling the registration api.
 type BaseReconciler struct {
 	client.Client
-	ObjectReconcilier
+	ObjectReconciler
 	Scheme      *runtime.Scheme
 	TrustDomain string
-	MyId        string
+	RootId      string
 	SpireClient registration.RegistrationClient
 	Log         logr.Logger
 }
@@ -145,7 +157,7 @@ func (r *BaseReconciler) getMatchingEntries(ctx context.Context, reqLogger logr.
 	}
 	var result []string
 	for _, entry := range entries.Entries {
-		if strings.HasPrefix(entry.ParentId, r.MyId) {
+		if strings.HasPrefix(entry.ParentId, r.RootId) {
 			result = append(result, entry.EntryId)
 		}
 	}

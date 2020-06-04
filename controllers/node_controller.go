@@ -30,7 +30,7 @@ import (
 
 // NodeReconciler reconciles a Node object
 type NodeReconciler struct {
-	MyId        string
+	RootId      string
 	SpireClient registration.RegistrationClient
 }
 
@@ -43,11 +43,11 @@ const (
 // +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
 
 func (r *NodeReconciler) makeSpiffeId(obj ObjectWithMetadata) string {
-	return fmt.Sprintf("%s/%s", r.MyId, obj.GetName())
+	return fmt.Sprintf("%s/%s", r.RootId, obj.GetName())
 }
 
 func (r *NodeReconciler) makeParentId(_ ObjectWithMetadata) string {
-	return r.MyId
+	return r.RootId
 }
 
 func (r *NodeReconciler) getSelectors(namespacedName types.NamespacedName) []*common.Selector {
@@ -57,7 +57,7 @@ func (r *NodeReconciler) getSelectors(namespacedName types.NamespacedName) []*co
 }
 
 func (r *NodeReconciler) getAllEntries(ctx context.Context) ([]*common.RegistrationEntry, error) {
-	entries, err := r.SpireClient.ListByParentID(ctx, &registration.ParentID{Id: r.MyId})
+	entries, err := r.SpireClient.ListByParentID(ctx, &registration.ParentID{Id: r.RootId})
 	if err != nil {
 		return nil, err
 	}
@@ -91,16 +91,16 @@ func (r *NodeReconciler) selectorsToNamespacedName(selectors []*common.Selector)
 	return nil
 }
 
-func NewNodeReconciler(client client.Client, log logr.Logger, scheme *runtime.Scheme, trustDomain string, myId string, spireClient registration.RegistrationClient) *BaseReconciler {
+func NewNodeReconciler(client client.Client, log logr.Logger, scheme *runtime.Scheme, trustDomain string, rootId string, spireClient registration.RegistrationClient) *BaseReconciler {
 	return &BaseReconciler{
 		Client:      client,
 		Scheme:      scheme,
 		TrustDomain: trustDomain,
-		MyId:        myId,
+		RootId:      rootId,
 		SpireClient: spireClient,
 		Log:         log,
-		ObjectReconcilier: &NodeReconciler{
-			MyId:        myId,
+		ObjectReconciler: &NodeReconciler{
+			RootId:      rootId,
 			SpireClient: spireClient,
 		},
 	}

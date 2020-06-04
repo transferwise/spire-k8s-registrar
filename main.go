@@ -77,7 +77,7 @@ func main() {
 	}
 	setupLog.Info("Connected to spire server.")
 
-	myId, err := makeMyId(context.Background(), setupLog, spireClient, config.Cluster, config.ControllerName, config.TrustDomain)
+	rootId, err := makeRootId(context.Background(), setupLog, spireClient, config.Cluster, config.ControllerName, config.TrustDomain)
 	if err != nil {
 		setupLog.Error(err, "unable to create parent ID")
 		os.Exit(1)
@@ -99,7 +99,7 @@ func main() {
 		ctrl.Log.WithName("controllers").WithName("Node"),
 		mgr.GetScheme(),
 		config.TrustDomain,
-		myId,
+		rootId,
 		spireClient,
 	).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
@@ -121,7 +121,7 @@ func main() {
 		ctrl.Log.WithName("controllers").WithName("Pod"),
 		mgr.GetScheme(),
 		config.TrustDomain,
-		myId,
+		rootId,
 		spireClient,
 		mode,
 		value,
@@ -208,22 +208,22 @@ func nodeID(trustDomain string, controllerName string, cluster string) string {
 	return makeID(trustDomain, "%s/%s/node", controllerName, cluster)
 }
 
-func makeMyId(ctx context.Context, reqLogger logr.Logger, spireClient registration.RegistrationClient, cluster string, controllerName string, trustDomain string) (string, error) {
-	myId := nodeID(trustDomain, controllerName, cluster)
+func makeRootId(ctx context.Context, reqLogger logr.Logger, spireClient registration.RegistrationClient, cluster string, controllerName string, trustDomain string) (string, error) {
+	rootId := nodeID(trustDomain, controllerName, cluster)
 	reqLogger.Info("Initializing operator parent ID.")
 	_, err := spireClient.CreateEntry(ctx, &common.RegistrationEntry{
 		Selectors: []*common.Selector{
 			{Type: "k8s_psat", Value: fmt.Sprintf("cluster:%s", cluster)},
 		},
 		ParentId: ServerID(trustDomain),
-		SpiffeId: myId,
+		SpiffeId: rootId,
 	})
 	if err != nil {
 		if status.Code(err) != codes.AlreadyExists {
-			reqLogger.Info("Failed to create operator parent ID", "spiffeID", myId)
+			reqLogger.Info("Failed to create operator parent ID", "spiffeID", rootId)
 			return "", err
 		}
 	}
-	reqLogger.Info("Initialized operator parent ID", "spiffeID", myId)
-	return myId, nil
+	reqLogger.Info("Initialized operator parent ID", "spiffeID", rootId)
+	return rootId, nil
 }
