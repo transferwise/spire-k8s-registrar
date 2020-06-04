@@ -40,7 +40,7 @@ const (
 	NodeNameSelector NodeSelectorSubType = "agent_node_name"
 )
 
-// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
 
 func (r *NodeReconciler) makeSpiffeId(obj ObjectWithMetadata) string {
 	return fmt.Sprintf("%s/%s", r.MyId, obj.GetName())
