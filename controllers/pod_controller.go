@@ -85,7 +85,7 @@ func (r *PodReconciler) selectorsToNamespacedName(selectors []*common.Selector) 
 	podName := ""
 	for _, selector := range selectors {
 		if selector.Type == "k8s" {
-			splitted := strings.SplitN(selector.Value, ":", 1)
+			splitted := strings.SplitN(selector.Value, ":", 2)
 			if len(splitted) > 1 {
 				switch WorkloadSelectorSubType(splitted[0]) {
 				case PodNamespaceSelector:

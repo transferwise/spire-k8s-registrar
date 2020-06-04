@@ -72,7 +72,7 @@ func (r *NodeReconciler) selectorsToNamespacedName(selectors []*common.Selector)
 	nodeName := ""
 	for _, selector := range selectors {
 		if selector.Type == "k8s_psat" {
-			splitted := strings.SplitN(selector.Value, ":", 1)
+			splitted := strings.SplitN(selector.Value, ":", 2)
 			if len(splitted) > 1 {
 				switch NodeSelectorSubType(splitted[0]) {
 				case NodeNameSelector:

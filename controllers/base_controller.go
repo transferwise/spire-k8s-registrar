@@ -87,7 +87,8 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	}
 
 	spiffeId := r.makeSpiffeId(obj)
-	if spiffeId == "" {
+	parentId := r.makeParentId(obj)
+	if spiffeId == "" || parentId == "" {
 		// Object does not need an entry. This might be a change, so we need to delete any hanging entries.
 		err := r.deleteAllEntries(ctx, reqLogger, matchedEntries)
 		return ctrl.Result{}, err
