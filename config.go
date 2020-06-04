@@ -8,22 +8,23 @@ import (
 )
 
 const (
-	defaultLogLevel    = "info"
-	defaultMetricsAddr = ":8080"
+	defaultLogLevel       = "info"
+	defaultMetricsAddr    = ":8080"
+	defaultControllerName = "spire-k8s-registrar"
 )
 
 type Config struct {
-	Cluster          string `hcl:"cluster"`
-	LogLevel         string `hcl:"log_level"`
-	LogPath          string `hcl:"log_path"`
-	MetricsAddr      string `hcl:"metrics_addr"`
-	ServerSocketPath string `hcl:"server_socket_path"`
-	ServerAddress    string `hcl:"server_address"`
-	TrustDomain      string `hcl:"trust_domain"`
-	PodController    bool   `hcl:"pod_controller"`
-	PodLabel         string `hcl:"pod_label"`
-	PodAnnotation    string `hcl:"pod_annotation"`
-	LeaderElection   bool   `hcl:"leader_election"`
+	Cluster         string `hcl:"cluster"`
+	LogLevel        string `hcl:"log_level"`
+	LogPath         string `hcl:"log_path"`
+	MetricsAddr     string `hcl:"metrics_addr"`
+	AgentSocketPath string `hcl:"agent_socket_path"`
+	ServerAddress   string `hcl:"server_address"`
+	TrustDomain     string `hcl:"trust_domain"`
+	PodLabel        string `hcl:"pod_label"`
+	PodAnnotation   string `hcl:"pod_annotation"`
+	LeaderElection  bool   `hcl:"leader_election"`
+	ControllerName  string `hcl:"controller_name"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -49,11 +50,14 @@ func ParseConfig(hclConfig string) (*Config, error) {
 	if c.Cluster == "" {
 		return nil, errs.New("cluster must be specified")
 	}
-	if c.ServerSocketPath == "" {
-		return nil, errs.New("server_socket_path must be specified")
+	if c.ServerAddress == "" {
+		return nil, errs.New("server_address must be specified")
 	}
 	if c.TrustDomain == "" {
 		return nil, errs.New("trust_domain must be specified")
+	}
+	if c.ControllerName == "" {
+		c.ControllerName = defaultControllerName
 	}
 
 	return c, nil

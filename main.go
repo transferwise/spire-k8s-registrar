@@ -19,15 +19,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/go-logr/logr"
+	"github.com/spiffe/spire/proto/spire/api/registration"
 	"github.com/spiffe/spire/proto/spire/common"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"net/url"
 	"os"
 	"path"
-
-	"github.com/go-logr/logr"
-	"github.com/spiffe/spire/proto/spire/api/registration"
 
 	"github.com/spiffe/go-spiffe/spiffe"
 	"google.golang.org/grpc"
@@ -71,14 +70,14 @@ func main() {
 	}))
 
 	//Connect to Spire Server
-	spireClient, err := ConnectSpire(context.Background(), setupLog, config.ServerAddress, config.ServerSocketPath)
+	spireClient, err := ConnectSpire(context.Background(), setupLog, config.ServerAddress, config.AgentSocketPath)
 	if err != nil {
 		setupLog.Error(err, "unable to connect to spire server")
 		os.Exit(1)
 	}
 	setupLog.Info("Connected to spire server.")
 
-	myId, err := makeMyId(context.Background(), setupLog, spireClient, config.Cluster, config.TrustDomain)
+	myId, err := makeMyId(context.Background(), setupLog, spireClient, config.Cluster, config.ControllerName, config.TrustDomain)
 	if err != nil {
 		setupLog.Error(err, "unable to create parent ID")
 		os.Exit(1)
@@ -89,7 +88,6 @@ func main() {
 		Scheme:             scheme,
 		MetricsBindAddress: config.MetricsAddr,
 		LeaderElection:     config.LeaderElection,
-		Port:               9443,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -158,23 +156,23 @@ func (slw SpiffeLogWrapper) Errorf(format string, args ...interface{}) {
 	slw.delegate.Info(fmt.Sprintf(format, args...))
 }
 
-func ConnectSpire(ctx context.Context, log logr.Logger, serverAddress, serverSocketPath string) (registration.RegistrationClient, error) {
+func ConnectSpire(ctx context.Context, log logr.Logger, serverAddress, agentSocketPath string) (registration.RegistrationClient, error) {
 
 	var conn *grpc.ClientConn
 	var err error
 
-	if serverAddress != "" {
-		tlsPeer, err := spiffe.NewTLSPeer(spiffe.WithWorkloadAPIAddr("unix://"+serverSocketPath), spiffe.WithLogger(SpiffeLogWrapper{log}))
-		if err != nil {
-			return nil, err
-		}
-		conn, err = tlsPeer.DialGRPC(ctx, serverAddress, spiffe.ExpectAnyPeer())
+	if agentSocketPath == "" {
+		fmt.Printf("Connecting to: %s\n", serverAddress)
+		conn, err = grpc.DialContext(ctx, serverAddress, grpc.WithInsecure())
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		fmt.Printf("Connecting to: %s\n", "unix://"+serverSocketPath)
-		conn, err = grpc.DialContext(ctx, "unix://"+serverSocketPath, grpc.WithInsecure())
+		tlsPeer, err := spiffe.NewTLSPeer(spiffe.WithWorkloadAPIAddr("unix://"+agentSocketPath), spiffe.WithLogger(SpiffeLogWrapper{log}))
+		if err != nil {
+			return nil, err
+		}
+		conn, err = tlsPeer.DialGRPC(ctx, serverAddress, spiffe.ExpectAnyPeer())
 		if err != nil {
 			return nil, err
 		}
@@ -206,12 +204,12 @@ func makeID(trustDomain string, pathFmt string, pathArgs ...interface{}) string 
 	return id.String()
 }
 
-func nodeID(trustDomain string, cluster string) string {
-	return makeID(trustDomain, "spire-k8s-operatorz/%s/node", cluster)
+func nodeID(trustDomain string, controllerName string, cluster string) string {
+	return makeID(trustDomain, "%s/%s/node", controllerName, cluster)
 }
 
-func makeMyId(ctx context.Context, reqLogger logr.Logger, spireClient registration.RegistrationClient, cluster string, trustDomain string) (string, error) {
-	myId := nodeID(trustDomain, cluster)
+func makeMyId(ctx context.Context, reqLogger logr.Logger, spireClient registration.RegistrationClient, cluster string, controllerName string, trustDomain string) (string, error) {
+	myId := nodeID(trustDomain, controllerName, cluster)
 	reqLogger.Info("Initializing operator parent ID.")
 	_, err := spireClient.CreateEntry(ctx, &common.RegistrationEntry{
 		Selectors: []*common.Selector{
