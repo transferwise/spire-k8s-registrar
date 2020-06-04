@@ -21,8 +21,6 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/spiffe/spire/proto/spire/api/registration"
 	"github.com/spiffe/spire/proto/spire/common"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -75,7 +73,7 @@ func (r *PodReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	var pod corev1.Pod
 	err := r.Get(ctx, req.NamespacedName, &pod)
 	if err != nil && !errors.IsNotFound(err) {
-		log.Error(err, "Unable to fetch Pod", "pod", req.NamespacedName)
+		log.Error(err, "Unable to fetch Pod")
 		return ctrl.Result{}, err
 	}
 
@@ -97,12 +95,19 @@ func (r *PodReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
+	nodeName := pod.Spec.NodeName
+	if nodeName == "" {
+		log.Info("Pod not scheduled on a node yet, ignoring")
+		return ctrl.Result{}, nil
+	}
+	parentId := makeSpiffeIdForNodeName(r.MyId, nodeName)
+
 	createEntryIfNotExistsResponse, err := r.SpireClient.CreateEntryIfNotExists(ctx, &common.RegistrationEntry{
 		Selectors: []*common.Selector{
 			r.k8sWorkloadSelector(PodNamespaceSelector, pod.Namespace),
 			r.k8sWorkloadSelector(PodNameSelector, pod.Name),
 		},
-		ParentId: r.MyId,
+		ParentId: parentId,
 		SpiffeId: spiffeId,
 	})
 	if err != nil {
@@ -110,7 +115,7 @@ func (r *PodReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 	if !createEntryIfNotExistsResponse.Preexisting {
-		log.Info("Created new spire entry", "pod", req.NamespacedName)
+		log.Info("Created new spire entry", "entry", createEntryIfNotExistsResponse.Entry)
 	}
 
 	err = r.deleteAllEntriesExcept(ctx, log, podSpireEntries, createEntryIfNotExistsResponse.Entry.EntryId)
@@ -152,8 +157,10 @@ func (r *PodReconciler) getEntriesMatchingPod(ctx context.Context, reqLogger log
 		return nil, err
 	}
 	var result []string
+
+	nodePrefix := makeSpiffeIdForNodeName(r.MyId, "")
 	for _, entry := range entries.Entries {
-		if entry.ParentId == r.MyId {
+		if strings.HasPrefix(entry.ParentId, nodePrefix) {
 			result = append(result, entry.EntryId)
 		}
 	}
@@ -164,7 +171,7 @@ func (r *PodReconciler) makeSpiffeIdForPod(pod *corev1.Pod) string {
 	spiffeId := ""
 	switch r.Mode {
 	case PodReconcilerModeServiceAccount:
-		spiffeId = r.makeID("ns/%s/sa/%s", pod.Namespace, pod.Spec.ServiceAccountName)
+		spiffeId = r.makeID(r.TrustDomain, "ns/%s/sa/%s", pod.Namespace, pod.Spec.ServiceAccountName)
 	case PodReconcilerModeLabel:
 		if val, ok := pod.GetLabels()[r.Value]; ok {
 			spiffeId = r.makeID("%s", val)
@@ -185,23 +192,7 @@ func (r *PodReconciler) k8sWorkloadSelector(selector WorkloadSelectorSubType, va
 }
 
 func (r *PodReconciler) ensureDeleted(ctx context.Context, reqLogger logr.Logger, entryId string) error {
-	if _, err := r.SpireClient.DeleteEntry(ctx, &registration.RegistrationEntryID{Id: entryId}); err != nil {
-		if status.Code(err) != codes.NotFound {
-			if status.Code(err) == codes.Internal {
-				// Spire server currently returns a 500 if delete fails due to the entry not existing. This is probably a bug.
-				// We work around it by attempting to fetch the entry, and if it's not found then all is good.
-				if _, err := r.SpireClient.FetchEntry(ctx, &registration.RegistrationEntryID{Id: entryId}); err != nil {
-					if status.Code(err) == codes.NotFound {
-						reqLogger.V(1).Info("Entry already deleted", "entry", entryId)
-						return nil
-					}
-				}
-			}
-			return err
-		}
-	}
-	reqLogger.Info("deleted entry", "entry", entryId)
-	return nil
+	return ensureSpireEntryDeleted(r.SpireClient, ctx, reqLogger, entryId)
 }
 
 func (r *PodReconciler) selectorsToNamespacedName(selectors []*common.Selector) *types.NamespacedName {
@@ -240,43 +231,51 @@ func (r *PodReconciler) pollSpire(out chan event.GenericEvent, s <-chan struct{}
 		case <-s:
 			return nil
 		case <-time.After(10 * time.Second):
-			log.Info("Syncing spire server entries")
-			entries, err := r.SpireClient.ListByParentID(ctx, &registration.ParentID{Id: r.MyId})
+			log.Info("Syncing spire server pod entries")
+
+			nodeEntries, err := r.SpireClient.ListByParentID(ctx, &registration.ParentID{Id: r.MyId})
 			if err != nil {
-				log.Error(err, "Unable to list spire entries")
+				log.Error(err, "Unable to list spire node entries")
 				continue
 			}
 			seen := make(map[string]bool)
-			for _, entry := range entries.Entries {
-				if namespacedName := r.selectorsToNamespacedName(entry.Selectors); namespacedName != nil {
-					reconcile := false
-					if seen[namespacedName.String()] {
-						// More than one entry found
-						reconcile = true
-					} else {
-						var pod corev1.Pod
-						err := r.Get(ctx, *namespacedName, &pod)
-						if err != nil {
-							if errors.IsNotFound(err) {
-								// Pod has been deleted
-								reconcile = true
-							} else {
-								log.Error(err, "Unable to fetch Pod", "pod", namespacedName)
-							}
+			for _, nodeEntry := range nodeEntries.Entries {
+				entries, err := r.SpireClient.ListByParentID(ctx, &registration.ParentID{Id: nodeEntry.SpiffeId})
+				if err != nil {
+					log.Error(err, "Unable to list spire pod entries")
+					continue
+				}
+				for _, entry := range entries.Entries {
+					if namespacedName := r.selectorsToNamespacedName(entry.Selectors); namespacedName != nil {
+						reconcile := false
+						if seen[namespacedName.String()] {
+							// More than one entry found
+							reconcile = true
 						} else {
-							if r.makeSpiffeIdForPod(&pod) == "" {
-								// Pod no longer needs a spiffe ID
-								reconcile = true
+							var pod corev1.Pod
+							err := r.Get(ctx, *namespacedName, &pod)
+							if err != nil {
+								if errors.IsNotFound(err) {
+									// Pod has been deleted
+									reconcile = true
+								} else {
+									log.Error(err, "Unable to fetch Pod", "pod", namespacedName)
+								}
+							} else {
+								if r.makeSpiffeIdForPod(&pod) == "" {
+									// Pod no longer needs a spiffe ID
+									reconcile = true
+								}
 							}
 						}
-					}
-					seen[namespacedName.String()] = true
-					if reconcile {
-						log.Info("Triggering reconciliation for pod", "pod", namespacedName)
-						out <- event.GenericEvent{Meta: &v1.ObjectMeta{
-							Name:      namespacedName.Name,
-							Namespace: namespacedName.Namespace,
-						}}
+						seen[namespacedName.String()] = true
+						if reconcile {
+							log.Info("Triggering reconciliation for pod", "pod", namespacedName)
+							out <- event.GenericEvent{Meta: &v1.ObjectMeta{
+								Name:      namespacedName.Name,
+								Namespace: namespacedName.Namespace,
+							}}
+						}
 					}
 				}
 			}
