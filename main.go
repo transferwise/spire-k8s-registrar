@@ -72,14 +72,14 @@ func main() {
 	//Connect to Spire Server
 	spireClient, err := ConnectSpire(context.Background(), setupLog, config.ServerAddress, config.AgentSocketPath)
 	if err != nil {
-		setupLog.Error(err, "unable to connect to spire server")
+		setupLog.Error(err, "Unable to connect to SPIRE workload API")
 		os.Exit(1)
 	}
 	setupLog.Info("Connected to spire server.")
 
 	rootId, err := makeRootId(context.Background(), setupLog, spireClient, config.Cluster, config.ControllerName, config.TrustDomain)
 	if err != nil {
-		setupLog.Error(err, "unable to create parent ID")
+		setupLog.Error(err, "Unable to create parent ID")
 		os.Exit(1)
 	}
 
@@ -90,7 +90,7 @@ func main() {
 		LeaderElection:     config.LeaderElection,
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error(err, "Unable to start manager")
 		os.Exit(1)
 	}
 
@@ -102,7 +102,7 @@ func main() {
 		rootId,
 		spireClient,
 	).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Node")
+		setupLog.Error(err, "Unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}
 
@@ -126,15 +126,15 @@ func main() {
 		mode,
 		value,
 	).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Pod")
+		setupLog.Error(err, "Unable to create controller", "controller", "Pod")
 		os.Exit(1)
 	}
 
 	// +kubebuilder:scaffold:builder
 
-	setupLog.Info("starting manager")
+	setupLog.Info("Starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
+		setupLog.Error(err, "Problem running manager")
 		os.Exit(1)
 	}
 }
@@ -162,7 +162,7 @@ func ConnectSpire(ctx context.Context, log logr.Logger, serverAddress, agentSock
 	var err error
 
 	if agentSocketPath == "" {
-		fmt.Printf("Connecting to: %s\n", serverAddress)
+		log.Info("Connecting to workload API without security", "serverAddress", serverAddress)
 		conn, err = grpc.DialContext(ctx, serverAddress, grpc.WithInsecure())
 		if err != nil {
 			return nil, err
