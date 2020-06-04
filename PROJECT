@@ -1,10 +1,3 @@
 domain: io.spiffe
 repo: github.com/transferwise/spire-k8s-registrar
-resources:
-- group: spiffeid
-  kind: ClusterSpiffeID
-  version: v1beta1
-- group: spiffeid
-  kind: SpireEntry
-  version: v1beta1
 version: "2"
