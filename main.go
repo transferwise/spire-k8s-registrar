@@ -96,14 +96,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.NodeReconciler{
-		Client:      mgr.GetClient(),
-		Log:         ctrl.Log.WithName("controllers").WithName("Node"),
-		Scheme:      mgr.GetScheme(),
-		TrustDomain: config.TrustDomain,
-		SpireClient: spireClient,
-		MyId:        myId,
-	}).SetupWithManager(mgr); err != nil {
+	if err = controllers.NewNodeReconciler(
+		mgr.GetClient(),
+		ctrl.Log.WithName("controllers").WithName("Node"),
+		mgr.GetScheme(),
+		config.TrustDomain,
+		myId,
+		spireClient,
+	).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}
@@ -118,16 +118,16 @@ func main() {
 		mode = controllers.PodReconcilerModeAnnotation
 		value = config.PodAnnotation
 	}
-	if err = (&controllers.PodReconciler{
-		Client:      mgr.GetClient(),
-		Log:         ctrl.Log.WithName("controllers").WithName("Pod"),
-		Scheme:      mgr.GetScheme(),
-		TrustDomain: config.TrustDomain,
-		Mode:        mode,
-		Value:       value,
-		SpireClient: spireClient,
-		MyId:        myId,
-	}).SetupWithManager(mgr); err != nil {
+	if err = controllers.NewPodReconciler(
+		mgr.GetClient(),
+		ctrl.Log.WithName("controllers").WithName("Pod"),
+		mgr.GetScheme(),
+		config.TrustDomain,
+		myId,
+		spireClient,
+		mode,
+		value,
+	).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pod")
 		os.Exit(1)
 	}
