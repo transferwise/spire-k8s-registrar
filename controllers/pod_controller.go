@@ -120,8 +120,16 @@ func (r *PodReconciler) makeSpiffeId(obj ObjectWithMetadata) string {
 	return r.makeSpiffeIdForPod(obj.(*corev1.Pod))
 }
 
-func (r *PodReconciler) makeParentId(_ ObjectWithMetadata) string {
-	return r.MyId
+func (r *PodReconciler) makeParentIdForPod(pod *corev1.Pod) string {
+	nodeName := pod.Spec.NodeName
+	if nodeName == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s/%s", r.MyId, nodeName)
+}
+
+func (r *PodReconciler) makeParentId(obj ObjectWithMetadata) string {
+	return r.makeParentIdForPod(obj.(*corev1.Pod))
 }
 
 func (r *PodReconciler) getSelectors(namespacedName types.NamespacedName) []*common.Selector {

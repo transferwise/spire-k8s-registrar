@@ -17,6 +17,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"github.com/go-logr/logr"
 	"github.com/spiffe/spire/proto/spire/api/registration"
 	"github.com/spiffe/spire/proto/spire/common"
@@ -42,7 +43,7 @@ const (
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
 
 func (r *NodeReconciler) makeSpiffeId(obj ObjectWithMetadata) string {
-	return makeSpiffeIdForNodeName(r.MyId, obj.GetName())
+	return fmt.Sprintf("%s/%s", r.MyId, obj.GetName())
 }
 
 func (r *NodeReconciler) makeParentId(_ ObjectWithMetadata) string {
