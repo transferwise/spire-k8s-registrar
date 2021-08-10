@@ -1,5 +1,7 @@
 # spire-k8s-registrar
 
+**NOTE: This repository is now archived, with its features upstreamed into https://github.com/spiffe/spire/blob/main/support/k8s/k8s-workload-registrar/. See https://docs.google.com/document/d/1DGHVw3n3w1YrXzGazjx-Qw6Mi44eoaSUJyqQuRqbyec for history.**
+
 A replacement registrar for issuing SVIDs to k8s workloads.
 
 The creation of registration entries is intended to be primarily done through creation of ClusterSpiffeId resource and a yet to be implemented namespaced SpiffeId resource.
